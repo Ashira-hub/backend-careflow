@@ -14,11 +14,11 @@ app.use(express.json());
 
 // ✅ PostgreSQL connection
 const pool = new Pool({ //new added
-  user: process.env.DB_USER || "postgres",
-  host: process.env.DB_HOST || "gondola.proxy.rlwy.net",
-  database: process.env.DB_NAME || "railway",
-  password: process.env.DB_PASSWORD || "WkzkMhBNHYDiSkYpAHbWfCMJzINdKidg",
-  port: Number(process.env.DB_PORT) || 27436,
+  user: process.env.PGUSER || "postgres",
+  host: process.env.PGHOST || "gondola.proxy.rlwy.net",
+  database: process.env.PGDATABASE || "railway",
+  password: process.env.PGPASSWORD || "WkzkMhBNHYDiSkYpAHbWfCMJzINdKidg",
+  port: Number(process.env.PGPORT) || 27436,
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }, // required for Railway
 });
