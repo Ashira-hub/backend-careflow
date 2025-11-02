@@ -81,6 +81,7 @@ async function ensureSchema() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthdate TEXT;`);
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_uri TEXT;`);
 
     // Appointments table for doctor scheduling
     await pool.query(`
@@ -146,10 +147,12 @@ async function ensureSchema() {
         address TEXT,
         gender TEXT,
         birthdate TEXT,
+        avatar_uri TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         last_edited TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
+    await pool.query(`ALTER TABLE profile ADD COLUMN IF NOT EXISTS avatar_uri TEXT;`);
 
     // Prescriptions table for storing prescriptions
     await pool.query(`
@@ -569,13 +572,13 @@ async function ensureSchema() {
       const { id } = req.params;
       // First try to get from profile table
       let result = await pool.query(
-        "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender FROM profile WHERE id = $1",
+        "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri FROM profile WHERE id = $1",
         [id]
       );
       // If not found in profile table, check users table
       if (result.rowCount === 0) {
         result = await pool.query(
-          "SELECT id, full_name AS name, role, email, active, phone, address, birthdate, gender FROM users WHERE id = $1",
+          "SELECT id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri FROM users WHERE id = $1",
           [id]
         );
       }
@@ -592,7 +595,7 @@ async function ensureSchema() {
     try {
       const { id } = req.params;
       const result = await pool.query(
-        "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, created_at, last_edited FROM profile WHERE id = $1",
+        "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri, created_at, last_edited FROM profile WHERE id = $1",
         [id]
       );
       if (result.rowCount === 0) return res.status(404).json({ message: "Profile not found" });
@@ -607,7 +610,7 @@ async function ensureSchema() {
   app.put("/api/profile/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, email, role, phone, address, birthdate, gender } = req.body || {};
+      const { name, email, role, phone, address, birthdate, gender, avatar_uri } = req.body || {};
       // Convert empty strings to null to avoid PostgreSQL errors
       const cleanPhone = phone && phone.trim() ? phone.trim() : null;
       const cleanAddress = address && address.trim() ? address.trim() : null;
@@ -626,10 +629,11 @@ async function ensureSchema() {
              address = COALESCE($5, address),
              birthdate = COALESCE($6, birthdate),
              gender = COALESCE($7, gender),
+             avatar_uri = COALESCE($8, avatar_uri),
              last_edited = NOW()
-         WHERE id = $8
-         RETURNING id, fullname AS name, role, email, phone, address, birthdate, gender, created_at, last_edited`,
-        [cleanName, cleanEmail, cleanRole, cleanPhone, cleanAddress, cleanBirthdate, cleanGender, id]
+         WHERE id = $9
+         RETURNING id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri, created_at, last_edited`,
+        [cleanName, cleanEmail, cleanRole, cleanPhone, cleanAddress, cleanBirthdate, cleanGender, avatar_uri || null, id]
       );
       if (result.rowCount === 0) return res.status(404).json({ message: "Profile not found" });
       res.json(result.rows[0]);
@@ -667,7 +671,7 @@ async function ensureSchema() {
   app.put("/api/users/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, email, role, active, password, phone, address, birthdate, gender } = req.body || {};
+      const { name, email, role, active, password, phone, address, birthdate, gender, avatar_uri } = req.body || {};
       if (!name || !email || !role) {
         return res.status(400).json({ message: "Missing required fields" });
       }
@@ -677,13 +681,13 @@ async function ensureSchema() {
       if (password) {
         const password_hash = await bcrypt.hash(String(password), 10);
         result = await pool.query(
-          "UPDATE users SET full_name = $1, email = $2, role = $3, active = COALESCE($4, active), password_hash = $5, phone = COALESCE($6, phone), address = COALESCE($7, address), birthdate = COALESCE($8, birthdate), gender = COALESCE($9, gender) WHERE id = $10 RETURNING id, full_name AS name, role, email, active, phone, address, birthdate, gender",
-          [name, normalizedEmail, role, typeof active === 'boolean' ? active : null, password_hash, phone ?? null, address ?? null, birthdate ?? null, gender ?? null, id]
+          "UPDATE users SET full_name = $1, email = $2, role = $3, active = COALESCE($4, active), password_hash = $5, phone = COALESCE($6, phone), address = COALESCE($7, address), birthdate = COALESCE($8, birthdate), gender = COALESCE($9, gender), avatar_uri = COALESCE($10, avatar_uri) WHERE id = $11 RETURNING id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri",
+          [name, normalizedEmail, role, typeof active === 'boolean' ? active : null, password_hash, phone ?? null, address ?? null, birthdate ?? null, gender ?? null, avatar_uri ?? null, id]
         );
       } else {
         result = await pool.query(
-          "UPDATE users SET full_name = $1, email = $2, role = $3, active = COALESCE($4, active), phone = COALESCE($5, phone), address = COALESCE($6, address), birthdate = COALESCE($7, birthdate), gender = COALESCE($8, gender) WHERE id = $9 RETURNING id, full_name AS name, role, email, active, phone, address, birthdate, gender",
-          [name, normalizedEmail, role, typeof active === 'boolean' ? active : null, phone ?? null, address ?? null, birthdate ?? null, gender ?? null, id]
+          "UPDATE users SET full_name = $1, email = $2, role = $3, active = COALESCE($4, active), phone = COALESCE($5, phone), address = COALESCE($6, address), birthdate = COALESCE($7, birthdate), gender = COALESCE($8, gender), avatar_uri = COALESCE($9, avatar_uri) WHERE id = $10 RETURNING id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri",
+          [name, normalizedEmail, role, typeof active === 'boolean' ? active : null, phone ?? null, address ?? null, birthdate ?? null, gender ?? null, avatar_uri ?? null, id]
         );
       }
       if (result.rowCount === 0) return res.status(404).json({ message: "User not found" });
@@ -695,8 +699,8 @@ async function ensureSchema() {
         const cleanBirthdate = birthdate && String(birthdate).trim() ? String(birthdate).trim() : null;
         const cleanGender = gender && String(gender).trim() ? String(gender).trim() : null;
         await pool.query(
-          `INSERT INTO profile (id, fullname, email, role, phone, address, birthdate, gender, last_edited)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+          `INSERT INTO profile (id, fullname, email, role, phone, address, birthdate, gender, avatar_uri, last_edited)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
            ON CONFLICT (id) DO UPDATE SET
              fullname = EXCLUDED.fullname,
              email = EXCLUDED.email,
@@ -705,8 +709,9 @@ async function ensureSchema() {
              address = COALESCE(EXCLUDED.address, profile.address),
              birthdate = COALESCE(EXCLUDED.birthdate, profile.birthdate),
              gender = COALESCE(EXCLUDED.gender, profile.gender),
+             avatar_uri = COALESCE(EXCLUDED.avatar_uri, profile.avatar_uri),
              last_edited = NOW()`,
-          [id, name, normalizedEmail, role, cleanPhone, cleanAddress, cleanBirthdate, cleanGender]
+          [id, name, normalizedEmail, role, cleanPhone, cleanAddress, cleanBirthdate, cleanGender, avatar_uri ?? null]
         );
       } catch (profileErr) {
         console.warn('Profile sync error:', profileErr);
