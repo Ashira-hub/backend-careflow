@@ -12,6 +12,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Helper to extract current user id from headers
+function getUserId(req) {
+  try {
+    const h = req.headers || {};
+    const xu = h["x-user-id"] || h["x-userid"]; // allow both
+    const auth = h["authorization"]; // supports "Bearer <userId>"
+    let id = null;
+    if (xu !== undefined) id = Number(xu);
+    else if (typeof auth === 'string' && auth.startsWith('Bearer ')) id = Number(auth.slice(7));
+    if (!Number.isFinite(id)) return null;
+    return id;
+  } catch {
+    return null;
+  }
+}
+
 // ✅ PostgreSQL connection
 const pool = new Pool({ //new added
   user: process.env.PGUSER || "postgres",
@@ -63,11 +79,13 @@ async function ensureSchema() {
         notes TEXT,
         done BOOLEAN DEFAULT FALSE,
         created_by_name TEXT,
+        created_by_user_id INTEGER,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
     // Add missing column if table already existed previously without it
     await pool.query(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS created_by_name TEXT;`);
+    await pool.query(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
 
     // Compatibility table (as shown in your DB UI): store full_name, date, time, status
     await pool.query(`
@@ -119,6 +137,22 @@ async function ensureSchema() {
         last_edited TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
+
+    // Prescriptions table for storing prescriptions
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS prescription (
+        id SERIAL PRIMARY KEY,
+        doctor_name TEXT NOT NULL,
+        patient_name TEXT NOT NULL,
+        medicine TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        dosage_strength TEXT,
+        description TEXT,
+        created_by_user_id INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+    await pool.query(`ALTER TABLE prescription ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
 
     console.log("✅ Database schema ensured");
   } catch (err) {
@@ -244,12 +278,16 @@ async function ensureSchema() {
   });
 
   // Return all patient records (with timestamps and fields) for reporting
-  app.get('/api/patient-records/all', async (_req, res) => {
+  app.get('/api/patient-records/all', async (req, res) => {
     try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const result = await pool.query(
         `SELECT id, patient, date, time, notes, doctor, medicine, dosage, created_at
          FROM patient_records
-         ORDER BY created_at DESC`
+         WHERE created_by_user_id = $1
+         ORDER BY created_at DESC`,
+        [userId]
       );
       res.json(result.rows);
     } catch (err) {
@@ -261,12 +299,14 @@ async function ensureSchema() {
   // Merge into latest record for a patient (avoid duplicates)
   app.put('/api/patient-records/latest', async (req, res) => {
     try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const { patient, doctor, medicine, dosage, notes, date, time } = req.body || {};
       if (!patient) return res.status(400).json({ message: 'Missing patient' });
       // Try update latest row for this patient
       const update = await pool.query(
         `WITH latest AS (
-           SELECT id FROM patient_records WHERE patient = $1 ORDER BY created_at DESC LIMIT 1
+           SELECT id FROM patient_records WHERE patient = $1 AND created_by_user_id = $2 ORDER BY created_at DESC LIMIT 1
          )
          UPDATE patient_records pr
          SET doctor = COALESCE($2, pr.doctor),
@@ -278,13 +318,13 @@ async function ensureSchema() {
          FROM latest
          WHERE pr.id = latest.id
          RETURNING pr.id, pr.patient, pr.date, pr.time, pr.notes, pr.doctor, pr.medicine, pr.dosage, pr.created_at`,
-        [String(patient).trim(), doctor ?? null, medicine ?? null, dosage ?? null, notes ?? null, date ?? null, time ?? null]
+        [String(patient).trim(), userId, doctor ?? null, medicine ?? null, dosage ?? null, notes ?? null, date ?? null, time ?? null]
       );
       if (update.rowCount > 0) return res.json(update.rows[0]);
       // If no existing, insert new
       const insert = await pool.query(
-        'INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, patient, date, time, notes, doctor, medicine, dosage, created_at',
-        [String(patient).trim(), date ?? null, time ?? null, notes ?? null, doctor ?? null, medicine ?? null, dosage ?? null]
+        'INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, notes, doctor, medicine, dosage, created_at',
+        [String(patient).trim(), date ?? null, time ?? null, notes ?? null, doctor ?? null, medicine ?? null, dosage ?? null, userId]
       );
       res.json(insert.rows[0]);
     } catch (err) {
@@ -306,6 +346,7 @@ async function ensureSchema() {
         doctor TEXT,
         medicine TEXT,
         dosage TEXT,
+        created_by_user_id INTEGER,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
@@ -313,6 +354,7 @@ async function ensureSchema() {
     await pool.query(`ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS doctor TEXT;`);
     await pool.query(`ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS medicine TEXT;`);
     await pool.query(`ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS dosage TEXT;`);
+    await pool.query(`ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
   } catch (e) {
     console.error('ensure patient_records table error:', e);
   }
@@ -320,11 +362,13 @@ async function ensureSchema() {
   // Add a patient record entry
   app.post('/api/patient-records', async (req, res) => {
     try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const { patient, date, time, notes, doctor, medicine, dosage } = req.body || {};
       if (!patient) return res.status(400).json({ message: 'Missing patient' });
       const insert = await pool.query(
-        'INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, patient, date, time, notes, doctor, medicine, dosage, created_at',
-        [String(patient).trim(), date || null, time || null, notes || null, doctor ? String(doctor).trim() : null, medicine ? String(medicine).trim() : null, dosage ? String(dosage).trim() : null]
+        'INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, notes, doctor, medicine, dosage, created_at',
+        [String(patient).trim(), date || null, time || null, notes || null, doctor ? String(doctor).trim() : null, medicine ? String(medicine).trim() : null, dosage ? String(dosage).trim() : null, userId]
       );
       res.status(201).json(insert.rows[0]);
     } catch (err) {
@@ -334,10 +378,13 @@ async function ensureSchema() {
   });
 
   // List distinct patients with latest record timestamp
-  app.get('/api/patient-records', async (_req, res) => {
+  app.get('/api/patient-records', async (req, res) => {
     try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const result = await pool.query(
-        `SELECT patient, MAX(created_at) AS last_ts FROM patient_records GROUP BY patient ORDER BY last_ts DESC`
+        `SELECT patient, MAX(created_at) AS last_ts FROM patient_records WHERE created_by_user_id = $1 GROUP BY patient ORDER BY last_ts DESC`,
+        [userId]
       );
       res.json(result.rows.map(r => ({ patient: r.patient, last_ts: r.last_ts })));
     } catch (err) {
@@ -350,13 +397,15 @@ async function ensureSchema() {
   // Create appointment
   app.post('/api/appointments', async (req, res) => {
     try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const { patient, date, time, notes, done = false, createdByName } = req.body || {};
       if (!patient || !date || !time) {
         return res.status(400).json({ message: 'Missing required fields' });
       }
       const insert = await pool.query(
-        'INSERT INTO appointments (patient, date, time, notes, done, created_by_name) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, patient, date, time, notes, done, created_by_name, created_at',
-        [String(patient).trim(), String(date).trim(), String(time).trim(), notes || null, Boolean(done), createdByName ? String(createdByName).trim() : null]
+        'INSERT INTO appointments (patient, date, time, notes, done, created_by_name, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, patient, date, time, notes, done, created_by_name, created_at',
+        [String(patient).trim(), String(date).trim(), String(time).trim(), notes || null, Boolean(done), createdByName ? String(createdByName).trim() : null, userId]
       );
       // Also reflect into simplified table for UI: store patient full name, date, time, and status
       try {
@@ -371,9 +420,11 @@ async function ensureSchema() {
   });
 
   // List appointments (optional)
-  app.get('/api/appointments', async (_req, res) => {
+  app.get('/api/appointments', async (req, res) => {
     try {
-      const result = await pool.query('SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments ORDER BY id DESC');
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const result = await pool.query('SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE created_by_user_id = $1 ORDER BY id DESC', [userId]);
       res.json(result.rows);
     } catch (err) {
       console.error('GET /api/appointments error:', err);
@@ -702,6 +753,81 @@ async function ensureSchema() {
     } catch (err) {
       console.error("❌ Login error:", err);
       res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  // ===== Prescriptions API =====
+  // Create prescription
+  app.post('/api/prescription', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const { patient_name, doctor_name, medicine, quantity, dosage_strength, description } = req.body || {};
+      if (!patient_name || !doctor_name || !medicine) {
+        return res.status(400).json({ message: 'Missing required fields: patient_name, doctor_name, medicine' });
+      }
+      const result = await pool.query(
+        'INSERT INTO prescription (doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at',
+        [String(doctor_name).trim(), String(patient_name).trim(), String(medicine).trim(), Number(quantity) || 0, dosage_strength || null, description || null, userId]
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      console.error('POST /api/prescription error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // Get all prescriptions
+  app.get('/api/prescription', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const result = await pool.query(
+        'SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at FROM prescription WHERE created_by_user_id = $1 ORDER BY created_at DESC',
+        [userId]
+      );
+      res.json(result.rows);
+    } catch (err) {
+      console.error('GET /api/prescription error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // Update prescription
+  app.put('/api/prescription/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { patient_name, doctor_name, medicine, quantity, dosage_strength, description } = req.body || {};
+      const result = await pool.query(
+        `UPDATE prescription 
+         SET doctor_name = COALESCE($1, doctor_name),
+             patient_name = COALESCE($2, patient_name),
+             medicine = COALESCE($3, medicine),
+             quantity = COALESCE($4, quantity),
+             dosage_strength = COALESCE($5, dosage_strength),
+             description = COALESCE($6, description)
+         WHERE id = $7
+         RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at`,
+        [doctor_name ?? null, patient_name ?? null, medicine ?? null, quantity ?? null, dosage_strength ?? null, description ?? null, id]
+      );
+      if (result.rowCount === 0) return res.status(404).json({ message: 'Prescription not found' });
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error('PUT /api/prescription/:id error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // Delete prescription
+  app.delete('/api/prescription/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const del = await pool.query('DELETE FROM prescription WHERE id = $1', [id]);
+      if (del.rowCount === 0) return res.status(404).json({ message: 'Prescription not found' });
+      res.status(204).send();
+    } catch (err) {
+      console.error('DELETE /api/prescription/:id error:', err);
+      res.status(500).json({ message: 'Server error' });
     }
   });
 
