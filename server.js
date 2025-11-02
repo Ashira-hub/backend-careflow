@@ -688,28 +688,26 @@ async function ensureSchema() {
       }
       if (result.rowCount === 0) return res.status(404).json({ message: "User not found" });
       
-      // Also sync to profile table
+      // Also sync to profile table (UPSERT to ensure consistency)
       try {
-        const profileExists = await pool.query("SELECT id FROM profile WHERE id = $1", [id]);
-        // Convert empty strings to null to avoid PostgreSQL errors
-        const cleanPhone = phone && phone.trim() ? phone.trim() : null;
-        const cleanAddress = address && address.trim() ? address.trim() : null;
-        const cleanBirthdate = birthdate && birthdate.trim() ? birthdate.trim() : null;
-        const cleanGender = gender && gender.trim() ? gender.trim() : null;
-        
-        if (profileExists.rowCount > 0) {
-          // Update existing profile
-          await pool.query(
-            "UPDATE profile SET fullname = $1, email = $2, role = $3, phone = COALESCE($4, phone), address = COALESCE($5, address), birthdate = COALESCE($6, birthdate), gender = COALESCE($7, gender), last_edited = NOW() WHERE id = $8",
-            [name, normalizedEmail, role, cleanPhone, cleanAddress, cleanBirthdate, cleanGender, id]
-          );
-        } else {
-          // Insert new profile
-          await pool.query(
-            "INSERT INTO profile (id, fullname, email, role, phone, address, birthdate, gender) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            [id, name, normalizedEmail, role, cleanPhone, cleanAddress, cleanBirthdate, cleanGender]
-          );
-        }
+        const cleanPhone = phone && String(phone).trim() ? String(phone).trim() : null;
+        const cleanAddress = address && String(address).trim() ? String(address).trim() : null;
+        const cleanBirthdate = birthdate && String(birthdate).trim() ? String(birthdate).trim() : null;
+        const cleanGender = gender && String(gender).trim() ? String(gender).trim() : null;
+        await pool.query(
+          `INSERT INTO profile (id, fullname, email, role, phone, address, birthdate, gender, last_edited)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+           ON CONFLICT (id) DO UPDATE SET
+             fullname = EXCLUDED.fullname,
+             email = EXCLUDED.email,
+             role = EXCLUDED.role,
+             phone = COALESCE(EXCLUDED.phone, profile.phone),
+             address = COALESCE(EXCLUDED.address, profile.address),
+             birthdate = COALESCE(EXCLUDED.birthdate, profile.birthdate),
+             gender = COALESCE(EXCLUDED.gender, profile.gender),
+             last_edited = NOW()`,
+          [id, name, normalizedEmail, role, cleanPhone, cleanAddress, cleanBirthdate, cleanGender]
+        );
       } catch (profileErr) {
         console.warn('Profile sync error:', profileErr);
         // Don't fail the request if profile sync fails
