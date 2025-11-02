@@ -421,7 +421,7 @@ async function ensureSchema() {
       const result = await pool.query(
         `SELECT id, patient, date, time, notes, doctor, medicine, dosage, created_at
          FROM patient_records
-         WHERE created_by_user_id = $1
+         WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
          ORDER BY created_at DESC`,
         [userId]
       );
@@ -551,6 +551,15 @@ async function ensureSchema() {
         'INSERT INTO appointments (patient, date, time, notes, done, created_by_name, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, patient, date, time, notes, done, created_by_name, created_at',
         [String(patient).trim(), String(date).trim(), String(time).trim(), notes || null, Boolean(done), createdByName ? String(createdByName).trim() : null, userId]
       );
+      // Also log into patient_records for unified reporting
+      try {
+        await pool.query(
+          'INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+          [String(patient).trim(), String(date).trim(), String(time).trim(), notes || null, createdByName ? String(createdByName).trim() : null, null, null, userId]
+        );
+      } catch (e) {
+        console.warn('mirror appointment to patient_records failed:', e?.message);
+      }
       // Also reflect into simplified table for UI: store patient full name, date, time, and status
       try {
         const status = Boolean(done) ? 'done' : 'pending';
