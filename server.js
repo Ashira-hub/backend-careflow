@@ -169,6 +169,19 @@ async function ensureSchema() {
       );
     `);
     await pool.query(`ALTER TABLE prescription ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+    await pool.query(`ALTER TABLE prescription ADD COLUMN IF NOT EXISTS status TEXT;`);
+
+    // Notifications table for user-targeted notifications
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT,
+        read BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
 
     // Activity log table for per-user recent activity
     await pool.query(`
@@ -207,6 +220,67 @@ async function ensureSchema() {
       res.json(result.rows);
     } catch (err) {
       console.error('GET /api/activity error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // Update prescription status (e.g., accepted by pharmacy) and notify doctor
+  app.put('/api/prescription/:id/status', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body || {};
+      const clean = typeof status === 'string' ? status.trim().toLowerCase() : null;
+      if (!clean) return res.status(400).json({ message: 'Missing status' });
+      const upd = await pool.query(
+        'UPDATE prescription SET status = $1 WHERE id = $2 RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id, status, created_at',
+        [clean, id]
+      );
+      if (upd.rowCount === 0) return res.status(404).json({ message: 'Prescription not found' });
+      const row = upd.rows[0];
+      try {
+        if (clean === 'accepted' && row.created_by_user_id) {
+          const title = 'Prescription Accepted';
+          const message = `Pharmacy accepted prescription for ${row.patient_name} • ${row.medicine}`;
+          await pool.query('INSERT INTO notifications (user_id, title, message) VALUES ($1, $2, $3)', [row.created_by_user_id, title, message]);
+          logActivity(row.created_by_user_id, 'prescription', message, { id: row.id, status: clean });
+        }
+      } catch (e) { console.warn('notify doctor failed:', e?.message); }
+      res.json(row);
+    } catch (err) {
+      console.error('PUT /api/prescription/:id/status error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // ===== Notifications API =====
+  // List notifications for current user
+  app.get('/api/notifications', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const limit = Math.max(1, Math.min(200, Number(req.query?.limit) || 100));
+      const result = await pool.query(
+        'SELECT id, title, message, read, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+        [userId, limit]
+      );
+      res.json(result.rows);
+    } catch (err) {
+      console.error('GET /api/notifications error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // Mark a notification as read
+  app.put('/api/notifications/:id/read', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const { id } = req.params;
+      const upd = await pool.query('UPDATE notifications SET read = TRUE WHERE id = $1 AND user_id = $2 RETURNING id, title, message, read, created_at', [id, userId]);
+      if (upd.rowCount === 0) return res.status(404).json({ message: 'Notification not found' });
+      res.json(upd.rows[0]);
+    } catch (err) {
+      console.error('PUT /api/notifications/:id/read error:', err);
       res.status(500).json({ message: 'Server error' });
     }
   });
