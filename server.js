@@ -526,14 +526,19 @@ async function ensureSchema() {
     try {
       const userId = getUserId(req);
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const result = await pool.query(
-        `SELECT patient, MAX(created_at) AS last_ts
-         FROM patient_records
-         WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
-         GROUP BY patient
-         ORDER BY last_ts DESC`,
-        [userId]
-      );
+      const ownOnly = String(req.query?.own || '').trim() === '1';
+      const sql = ownOnly
+        ? `SELECT patient, MAX(created_at) AS last_ts
+           FROM patient_records
+           WHERE created_by_user_id = $1
+           GROUP BY patient
+           ORDER BY last_ts DESC`
+        : `SELECT patient, MAX(created_at) AS last_ts
+           FROM patient_records
+           WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
+           GROUP BY patient
+           ORDER BY last_ts DESC`;
+      const result = await pool.query(sql, [userId]);
       res.json(result.rows.map(r => ({ patient: r.patient, last_ts: r.last_ts })));
     } catch (err) {
       console.error('GET /api/patient-records error:', err);
