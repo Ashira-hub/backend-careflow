@@ -39,6 +39,19 @@ const pool = new Pool({ //new added
   ssl: { rejectUnauthorized: false }, // required for Railway
 });
 
+// Insert a row into activity_log; best-effort (errors are swallowed)
+async function logActivity(userId, type, title, details) {
+  try {
+    if (!Number.isFinite(Number(userId))) return;
+    await pool.query(
+      'INSERT INTO activity_log (user_id, type, title, details) VALUES ($1, $2, $3, $4)',
+      [Number(userId), type || null, title || null, details ? JSON.stringify(details) : null]
+    );
+  } catch (e) {
+    console.warn('activity log failed:', e?.message);
+  }
+}
+
 // ✅ Function to ensure the users table exists
 async function ensureSchema() {
   try {
@@ -154,6 +167,18 @@ async function ensureSchema() {
     `);
     await pool.query(`ALTER TABLE prescription ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
 
+    // Activity log table for per-user recent activity
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS activity_log (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        type TEXT,
+        title TEXT,
+        details JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+
     console.log("✅ Database schema ensured");
   } catch (err) {
     console.error("❌ Schema error:", err);
@@ -165,6 +190,40 @@ async function ensureSchema() {
   await ensureSchema();
 
   // 🟩 Routes
+  // ===== Activity API =====
+  // List recent activity for current user
+  app.get('/api/activity', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const limit = Math.max(1, Math.min(200, Number(req.query?.limit) || 50));
+      const result = await pool.query(
+        'SELECT id, type, title, details, created_at FROM activity_log WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+        [userId, limit]
+      );
+      res.json(result.rows);
+    } catch (err) {
+      console.error('GET /api/activity error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // Add a custom activity item for current user
+  app.post('/api/activity', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const { type, title, details } = req.body || {};
+      const ins = await pool.query(
+        'INSERT INTO activity_log (user_id, type, title, details) VALUES ($1, $2, $3, $4) RETURNING id, type, title, details, created_at',
+        [userId, type || null, title || null, details ? JSON.stringify(details) : null]
+      );
+      res.status(201).json(ins.rows[0]);
+    } catch (err) {
+      console.error('POST /api/activity error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
   app.get("/users", async (req, res) => {
     try {
       const result = await pool.query(
@@ -326,6 +385,10 @@ async function ensureSchema() {
         'INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, notes, doctor, medicine, dosage, created_at',
         [String(patient).trim(), date ?? null, time ?? null, notes ?? null, doctor ?? null, medicine ?? null, dosage ?? null, userId]
       );
+      // Log activity for upsert
+      logActivity(userId, 'records', `Patient record updated: ${patient}`, {
+        patient, doctor, medicine, dosage, notes, id: insert.rows[0]?.id
+      });
       res.json(insert.rows[0]);
     } catch (err) {
       console.error('PUT /api/patient-records/latest error:', err);
@@ -370,6 +433,10 @@ async function ensureSchema() {
         'INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, notes, doctor, medicine, dosage, created_at',
         [String(patient).trim(), date || null, time || null, notes || null, doctor ? String(doctor).trim() : null, medicine ? String(medicine).trim() : null, dosage ? String(dosage).trim() : null, userId]
       );
+      // Log activity
+      logActivity(userId, 'records', `Patient record added: ${patient}`, {
+        patient, doctor, medicine, dosage, notes, id: insert.rows[0]?.id
+      });
       res.status(201).json(insert.rows[0]);
     } catch (err) {
       console.error('POST /api/patient-records error:', err);
@@ -412,6 +479,10 @@ async function ensureSchema() {
         const status = Boolean(done) ? 'done' : 'pending';
         await pool.query('INSERT INTO appointment (full_name, date, time, status, appointment_id) VALUES ($1, $2, $3, $4, $5)', [String(patient).trim(), String(date).trim(), String(time).trim(), status, insert.rows[0].id]);
       } catch {}
+      // Log activity
+      logActivity(userId, 'appointment', `Appointment created: ${patient} • ${date} ${time}`, {
+        id: insert.rows[0]?.id, patient, date, time, notes, done
+      });
       res.status(201).json(insert.rows[0]);
     } catch (err) {
       console.error('POST /api/appointments error:', err);
@@ -450,6 +521,11 @@ async function ensureSchema() {
           'UPDATE appointment SET full_name = COALESCE($1, full_name), date = COALESCE($2, date), time = COALESCE($3, time), status = $4 WHERE appointment_id = $5',
           [updated.patient, updated.date, updated.time, status, updated.id]
         );
+      } catch {}
+      // Log activity
+      try {
+        const userId = getUserId(req);
+        if (userId) logActivity(userId, 'appointment_update', `Appointment updated: ${updated.patient} • ${updated.date} ${updated.time}`, updated);
       } catch {}
       res.json(updated);
     } catch (err) {
@@ -770,6 +846,10 @@ async function ensureSchema() {
         'INSERT INTO prescription (doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at',
         [String(doctor_name).trim(), String(patient_name).trim(), String(medicine).trim(), Number(quantity) || 0, dosage_strength || null, description || null, userId]
       );
+      // Log activity
+      logActivity(userId, 'prescription', `Prescription submitted: ${patient_name} • ${medicine}`, {
+        id: result.rows[0]?.id, patient_name, doctor_name, medicine, quantity, dosage_strength
+      });
       res.status(201).json(result.rows[0]);
     } catch (err) {
       console.error('POST /api/prescription error:', err);
