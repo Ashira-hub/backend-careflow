@@ -527,7 +527,11 @@ async function ensureSchema() {
       const userId = getUserId(req);
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const result = await pool.query(
-        `SELECT patient, MAX(created_at) AS last_ts FROM patient_records WHERE created_by_user_id = $1 GROUP BY patient ORDER BY last_ts DESC`,
+        `SELECT patient, MAX(created_at) AS last_ts
+         FROM patient_records
+         WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
+         GROUP BY patient
+         ORDER BY last_ts DESC`,
         [userId]
       );
       res.json(result.rows.map(r => ({ patient: r.patient, last_ts: r.last_ts })));
