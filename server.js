@@ -378,6 +378,43 @@ async function ensureSchema() {
     }
   });
 
+  // Update a lab test status (and mirror into lab_records)
+  app.put('/api/lab-tests/:id/status', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const { id } = req.params;
+      const { status } = req.body || {};
+      if (typeof status !== 'string' || !status.trim()) return res.status(400).json({ message: 'Missing status' });
+      const clean = String(status).trim();
+      const upd = await pool.query(
+        `UPDATE lab_tests
+         SET status = $1
+         WHERE id = $2 AND (created_by_user_id = $3 OR created_by_user_id IS NULL)
+         RETURNING id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
+        [clean, id, userId]
+      );
+      if (upd.rowCount === 0) return res.status(404).json({ message: 'Lab test not found' });
+      const row = upd.rows[0];
+      // Mirror update into lab_records by matching core identity fields
+      try {
+        await pool.query(
+          `UPDATE lab_records
+           SET status = $1
+           WHERE test_name = $2 AND patient = $3 AND (date = $4 OR $4 IS NULL) AND (created_by_user_id = $5 OR created_by_user_id IS NULL)`,
+          [clean, row.test_name, row.patient, row.date || null, userId]
+        );
+      } catch (e) {
+        console.warn('mirror status to lab_records failed:', e?.message);
+      }
+      logActivity(userId, 'lab', `Lab test status updated: ${row.test_name} • ${row.patient} -> ${clean}`, { id: row.id, status: clean });
+      res.json(row);
+    } catch (err) {
+      console.error('PUT /api/lab-tests/:id/status error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
   // ===== Supervisor Schedules API =====
   // Create schedule
   app.post('/api/schedules', async (req, res) => {
