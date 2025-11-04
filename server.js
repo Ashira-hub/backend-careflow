@@ -234,6 +234,26 @@ async function ensureSchema() {
     await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS notes TEXT;`);
     await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
 
+    // Lab records table (for finalized/recorded lab results metadata)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lab_records (
+        id SERIAL PRIMARY KEY,
+        test_name TEXT NOT NULL,
+        patient TEXT NOT NULL,
+        category TEXT,
+        status TEXT,
+        date TEXT,
+        notes TEXT,
+        created_by_user_id INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+    await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS category TEXT;`);
+    await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS status TEXT;`);
+    await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS date TEXT;`);
+    await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS notes TEXT;`);
+    await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+
     console.log("✅ Database schema ensured");
   } catch (err) {
     console.error("❌ Schema error:", err);
@@ -263,6 +283,48 @@ async function ensureSchema() {
     }
   });
 
+  // ===== Laboratory Records API =====
+  // Create a new lab record
+  app.post('/api/lab-records', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const { test_name, patient, category, status, date, notes } = req.body || {};
+      if (!test_name || !patient) return res.status(400).json({ message: 'Missing required fields' });
+      const insert = await pool.query(
+        `INSERT INTO lab_records (test_name, patient, category, status, date, notes, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         RETURNING id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
+        [String(test_name).trim(), String(patient).trim(), category || null, status || null, date || null, notes || null, userId]
+      );
+      const row = insert.rows[0];
+      logActivity(userId, 'records', `Lab record added: ${row.test_name} • ${row.patient}`, row);
+      res.status(201).json(row);
+    } catch (err) {
+      console.error('POST /api/lab-records error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // List lab records for current user
+  app.get('/api/lab-records', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const result = await pool.query(
+        `SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
+         FROM lab_records
+         WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
+         ORDER BY id DESC`,
+        [userId]
+      );
+      res.json(result.rows);
+    } catch (err) {
+      console.error('GET /api/lab-records error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
   // ===== Laboratory Tests API =====
   // Create a new lab test
   app.post('/api/lab-tests', async (req, res) => {
@@ -278,6 +340,16 @@ async function ensureSchema() {
         [String(test_name).trim(), String(patient).trim(), category || null, status || null, date || null, notes || null, userId]
       );
       const row = insert.rows[0];
+      // Mirror into lab_records so records reflect tests
+      try {
+        await pool.query(
+          `INSERT INTO lab_records (test_name, patient, category, status, date, notes, created_by_user_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [row.test_name, row.patient, row.category || null, row.status || null, row.date || null, row.notes || null, userId]
+        );
+      } catch (e) {
+        console.warn('mirror lab_test to lab_records failed:', e?.message);
+      }
       // Log activity
       logActivity(userId, 'lab', `Lab test added: ${row.test_name} • ${row.patient}`, row);
       res.status(201).json(row);
