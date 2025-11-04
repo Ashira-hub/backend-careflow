@@ -195,6 +195,21 @@ async function ensureSchema() {
       );
     `);
 
+    // Schedules table for supervisor-created schedules
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS schedules (
+        id SERIAL PRIMARY KEY,
+        nurse TEXT,
+        title TEXT,
+        date TEXT,
+        start_time TEXT,
+        end_time TEXT,
+        note TEXT,
+        created_by_user_id INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+
     console.log("✅ Database schema ensured");
   } catch (err) {
     console.error("❌ Schema error:", err);
@@ -220,6 +235,89 @@ async function ensureSchema() {
       res.json(result.rows);
     } catch (err) {
       console.error('GET /api/activity error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // ===== Supervisor Schedules API =====
+  // Create schedule
+  app.post('/api/schedules', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const { nurse, title, date, startTime, endTime, note } = req.body || {};
+      if (!title || !date) return res.status(400).json({ message: 'Missing required fields' });
+      const insert = await pool.query(
+        `INSERT INTO schedules (nurse, title, date, start_time, end_time, note, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         RETURNING id, nurse, title, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
+        [nurse || null, String(title).trim(), String(date).trim(), startTime || null, endTime || null, note || null, userId]
+      );
+      logActivity(userId, 'schedule', `Schedule created: ${title} • ${date}`, insert.rows[0]);
+      res.status(201).json(insert.rows[0]);
+    } catch (err) {
+      console.error('POST /api/schedules error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // List schedules for current user
+  app.get('/api/schedules', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const result = await pool.query(
+        `SELECT id, nurse, title, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
+         FROM schedules WHERE created_by_user_id = $1 ORDER BY id DESC`,
+        [userId]
+      );
+      res.json(result.rows);
+    } catch (err) {
+      console.error('GET /api/schedules error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // Update schedule
+  app.put('/api/schedules/:id', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const { id } = req.params;
+      const { nurse, title, date, startTime, endTime, note } = req.body || {};
+      const result = await pool.query(
+        `UPDATE schedules
+         SET nurse = COALESCE($1, nurse),
+             title = COALESCE($2, title),
+             date = COALESCE($3, date),
+             start_time = COALESCE($4, start_time),
+             end_time = COALESCE($5, end_time),
+             note = COALESCE($6, note)
+         WHERE id = $7 AND created_by_user_id = $8
+         RETURNING id, nurse, title, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
+        [nurse ?? null, title ?? null, date ?? null, startTime ?? null, endTime ?? null, note ?? null, id, userId]
+      );
+      if (result.rowCount === 0) return res.status(404).json({ message: 'Schedule not found' });
+      logActivity(userId, 'schedule_update', `Schedule updated: ${result.rows[0].title} • ${result.rows[0].date}`, result.rows[0]);
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error('PUT /api/schedules/:id error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // Delete schedule
+  app.delete('/api/schedules/:id', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const { id } = req.params;
+      const del = await pool.query('DELETE FROM schedules WHERE id = $1 AND created_by_user_id = $2', [id, userId]);
+      if (del.rowCount === 0) return res.status(404).json({ message: 'Schedule not found' });
+      logActivity(userId, 'schedule_delete', `Schedule deleted: ${id}`, { id });
+      res.status(204).send();
+    } catch (err) {
+      console.error('DELETE /api/schedules/:id error:', err);
       res.status(500).json({ message: 'Server error' });
     }
   });
