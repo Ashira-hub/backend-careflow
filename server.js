@@ -201,6 +201,7 @@ async function ensureSchema() {
         id SERIAL PRIMARY KEY,
         nurse TEXT,
         title TEXT,
+        station TEXT,
         date TEXT,
         start_time TEXT,
         end_time TEXT,
@@ -209,6 +210,29 @@ async function ensureSchema() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
+    // Ensure station column exists for older deployments
+    await pool.query(`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS station TEXT;`);
+
+    // Laboratory tests table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lab_tests (
+        id SERIAL PRIMARY KEY,
+        test_name TEXT NOT NULL,
+        patient TEXT NOT NULL,
+        category TEXT,
+        status TEXT,
+        date TEXT,
+        notes TEXT,
+        created_by_user_id INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+    // Ensure columns exist for older deployments
+    await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS category TEXT;`);
+    await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS status TEXT;`);
+    await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS date TEXT;`);
+    await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS notes TEXT;`);
+    await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
 
     console.log("✅ Database schema ensured");
   } catch (err) {
@@ -239,19 +263,62 @@ async function ensureSchema() {
     }
   });
 
+  // ===== Laboratory Tests API =====
+  // Create a new lab test
+  app.post('/api/lab-tests', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const { test_name, patient, category, status, date, notes } = req.body || {};
+      if (!test_name || !patient) return res.status(400).json({ message: 'Missing required fields' });
+      const insert = await pool.query(
+        `INSERT INTO lab_tests (test_name, patient, category, status, date, notes, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         RETURNING id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
+        [String(test_name).trim(), String(patient).trim(), category || null, status || null, date || null, notes || null, userId]
+      );
+      const row = insert.rows[0];
+      // Log activity
+      logActivity(userId, 'lab', `Lab test added: ${row.test_name} • ${row.patient}`, row);
+      res.status(201).json(row);
+    } catch (err) {
+      console.error('POST /api/lab-tests error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // List lab tests for the current user
+  app.get('/api/lab-tests', async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const result = await pool.query(
+        `SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
+         FROM lab_tests
+         WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
+         ORDER BY id DESC`,
+        [userId]
+      );
+      res.json(result.rows);
+    } catch (err) {
+      console.error('GET /api/lab-tests error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
   // ===== Supervisor Schedules API =====
   // Create schedule
   app.post('/api/schedules', async (req, res) => {
     try {
       const userId = getUserId(req);
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { nurse, title, date, startTime, endTime, note } = req.body || {};
+      const { nurse, title, station, date, startTime, endTime, note } = req.body || {};
       if (!title || !date) return res.status(400).json({ message: 'Missing required fields' });
       const insert = await pool.query(
-        `INSERT INTO schedules (nurse, title, date, start_time, end_time, note, created_by_user_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         RETURNING id, nurse, title, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
-        [nurse || null, String(title).trim(), String(date).trim(), startTime || null, endTime || null, note || null, userId]
+        `INSERT INTO schedules (nurse, title, station, date, start_time, end_time, note, created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         RETURNING id, nurse, title, station, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
+        [nurse || null, String(title).trim(), station || null, String(date).trim(), startTime || null, endTime || null, note || null, userId]
       );
       logActivity(userId, 'schedule', `Schedule created: ${title} • ${date}`, insert.rows[0]);
       res.status(201).json(insert.rows[0]);
@@ -267,7 +334,7 @@ async function ensureSchema() {
       const userId = getUserId(req);
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const result = await pool.query(
-        `SELECT id, nurse, title, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
+        `SELECT id, nurse, title, station, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
          FROM schedules WHERE created_by_user_id = $1 ORDER BY id DESC`,
         [userId]
       );
@@ -284,18 +351,19 @@ async function ensureSchema() {
       const userId = getUserId(req);
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const { id } = req.params;
-      const { nurse, title, date, startTime, endTime, note } = req.body || {};
+      const { nurse, title, station, date, startTime, endTime, note } = req.body || {};
       const result = await pool.query(
         `UPDATE schedules
          SET nurse = COALESCE($1, nurse),
              title = COALESCE($2, title),
-             date = COALESCE($3, date),
-             start_time = COALESCE($4, start_time),
-             end_time = COALESCE($5, end_time),
-             note = COALESCE($6, note)
-         WHERE id = $7 AND created_by_user_id = $8
-         RETURNING id, nurse, title, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
-        [nurse ?? null, title ?? null, date ?? null, startTime ?? null, endTime ?? null, note ?? null, id, userId]
+             station = COALESCE($3, station),
+             date = COALESCE($4, date),
+             start_time = COALESCE($5, start_time),
+             end_time = COALESCE($6, end_time),
+             note = COALESCE($7, note)
+         WHERE id = $8 AND created_by_user_id = $9
+         RETURNING id, nurse, title, station, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
+        [nurse ?? null, title ?? null, station ?? null, date ?? null, startTime ?? null, endTime ?? null, note ?? null, id, userId]
       );
       if (result.rowCount === 0) return res.status(404).json({ message: 'Schedule not found' });
       logActivity(userId, 'schedule_update', `Schedule updated: ${result.rows[0].title} • ${result.rows[0].date}`, result.rows[0]);
