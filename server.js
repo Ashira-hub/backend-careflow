@@ -303,7 +303,7 @@ async function ensureSchema() {
     } catch (err) {
       console.error('POST /api/lab-records error:', err);
       res.status(500).json({ message: 'Server error' });
-    }
+    } 
   });
 
   // List lab records for current user
@@ -1227,18 +1227,21 @@ async function ensureSchema() {
     }
   });
 
-  // Get all prescriptions
-  app.get('/api/prescription', async (req, res) => {
+  // Get all prescriptions for a specific user (by URL param id)
+  app.get('/api/prescription/:id', async (req, res) => {
     try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const { id } = req.params;
+      const userId = Number(id);
+      if (!Number.isFinite(userId)) {
+        return res.status(400).json({ message: 'Invalid user id' });
+      }
       const result = await pool.query(
-        'SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at FROM prescription WHERE created_by_user_id = $1 ORDER BY created_at DESC',
+        'SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_at FROM prescription WHERE created_by_user_id = $1 ORDER BY created_at DESC',
         [userId]
       );
       res.json(result.rows);
     } catch (err) {
-      console.error('GET /api/prescription error:', err);
+      console.error('GET /api/prescription/:id error:', err);
       res.status(500).json({ message: 'Server error' });
     }
   });
