@@ -283,6 +283,33 @@ async function ensureSchema() {
     }
   });
 
+  // List prescriptions (optionally filter by status)
+  app.get('/api/prescriptions', async (req, res) => {
+    try {
+      const status = typeof req.query?.status === 'string' ? String(req.query.status).trim().toLowerCase() : null;
+      let result;
+      if (status) {
+        result = await pool.query(
+          `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_by_user_id, created_at
+           FROM prescription
+           WHERE LOWER(COALESCE(status,'')) = $1
+           ORDER BY created_at DESC`,
+          [status]
+        );
+      } else {
+        result = await pool.query(
+          `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_by_user_id, created_at
+           FROM prescription
+           ORDER BY created_at DESC`
+        );
+      }
+      res.json(result.rows);
+    } catch (err) {
+      console.error('GET /api/prescriptions error:', err);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
   // ===== Laboratory Records API =====
   // Create a new lab record
   app.post('/api/lab-records', async (req, res) => {
