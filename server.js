@@ -28,15 +28,15 @@ function getUserId(req) {
   }
 }
 
-// ✅ PostgreSQL connection
-const pool = new Pool({ //new added
+// PostgreSQL connection
+const pool = new Pool({
   user: process.env.PGUSER || "postgres",
   host: process.env.PGHOST || "gondola.proxy.rlwy.net",
   database: process.env.PGDATABASE || "railway",
   password: process.env.PGPASSWORD || "WkzkMhBNHYDiSkYpAHbWfCMJzINdKidg",
   port: Number(process.env.PGPORT) || 27436,
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // required for Railway
+  ssl: { rejectUnauthorized: false },
 });
 
 // Insert a row into activity_log; best-effort (errors are swallowed)
@@ -52,46 +52,66 @@ async function logActivity(userId, type, title, details) {
   }
 }
 
-// ✅ Function to ensure the users table exists
+// Function to ensure the database schema exists
 async function ensureSchema() {
+  const client = await pool.connect();
+  
   try {
-    await pool.query(`
+    await client.query('BEGIN');
+
+    // Create users table if not exists
+    await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
-        full_name TEXT,
-        role TEXT,
-        email TEXT UNIQUE,
-        password_hash TEXT,
+        full_name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL,
+        phone TEXT,
+        address TEXT,
+        birthdate TEXT,
+        gender TEXT,
+        avatar_uri TEXT,
+        active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`
+    );
+
+    // Create activity_log table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS activity_log (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        details TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
+      )`
+    );
 
-    // Ensure 'active' column exists for admin management toggles
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE;`);
-    // Ensure password_hash exists for credential storage
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;`);
-    
-    // Add optional profile fields if they don't exist
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthdate TEXT;`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT;`);
-    
-    // Remove legacy unique constraint on role to allow multiple users per role
-    try {
-      await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_key;`);
-    } catch (e) {
-      console.warn('Could not drop users_role_key constraint (may not exist):', e?.message);
-    }
-    // Optional profile fields
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthdate TEXT;`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT;`);
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_uri TEXT;`);
+    // Create patients table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS patients (
+        id SERIAL PRIMARY KEY,
+        full_name TEXT NOT NULL,
+        email TEXT UNIQUE,
+        phone TEXT,
+        address TEXT,
+        birthdate TEXT,
+        gender TEXT,
+        blood_type TEXT,
+        height TEXT,
+        weight TEXT,
+        medical_history TEXT,
+        allergies TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`
+    );
 
-    // Appointments table for doctor scheduling
-    await pool.query(`
+    // Create appointments table if not exists
+    await client.query(`
       CREATE TABLE IF NOT EXISTS appointments (
         id SERIAL PRIMARY KEY,
         patient TEXT NOT NULL,
@@ -99,137 +119,14 @@ async function ensureSchema() {
         time TEXT NOT NULL,
         notes TEXT,
         done BOOLEAN DEFAULT FALSE,
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_by_name TEXT,
-        created_by_user_id INTEGER,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-    // Add missing column if table already existed previously without it
-    await pool.query(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS created_by_name TEXT;`);
-    await pool.query(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+      )`
+    );
 
-    // Compatibility table (as shown in your DB UI): store full_name, date, time, status
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS appointment (
-        full_name TEXT,
-        date TEXT,
-        time TEXT,
-        status TEXT,
-        appointment_id INTEGER UNIQUE
-      );
-    `);
-    // Make sure new columns exist if table was created earlier
-    await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS date TEXT;`);
-    await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS time TEXT;`);
-    await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS status TEXT;`);
-    await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS appointment_id INTEGER UNIQUE;`);
-
-    // Pharmacy inventory table for medicines
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS inventory (
-        id SERIAL PRIMARY KEY,
-        category TEXT,
-        brand_name TEXT,
-        generic_name TEXT NOT NULL,
-        dosage_type TEXT,
-        strength TEXT,
-        unit TEXT,
-        expiration_date TEXT,
-        stock INTEGER DEFAULT 0,
-        description TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-    // Ensure stock column exists for earlier deployments
-    await pool.query(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 0;`);
-
-    // Profile table for storing user profile information
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS profile (
-        id SERIAL PRIMARY KEY,
-        fullname TEXT,
-        role TEXT,
-        email TEXT,
-        phone TEXT,
-        address TEXT,
-        gender TEXT,
-        birthdate TEXT,
-        avatar_uri TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        last_edited TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-    await pool.query(`ALTER TABLE profile ADD COLUMN IF NOT EXISTS avatar_uri TEXT;`);
-
-    // Prescriptions table for storing prescriptions
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS prescription (
-        id SERIAL PRIMARY KEY,
-        doctor_name TEXT NOT NULL,
-        patient_name TEXT NOT NULL,
-        medicine TEXT NOT NULL,
-        quantity INTEGER NOT NULL,
-        dosage_strength TEXT,
-        description TEXT,
-        created_by_user_id INTEGER,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-    await pool.query(`ALTER TABLE prescription ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
-    await pool.query(`ALTER TABLE prescription ADD COLUMN IF NOT EXISTS status TEXT;`);
-
-    // Notifications table for user-targeted notifications
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS notifications (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL,
-        title TEXT NOT NULL,
-        message TEXT,
-        read BOOLEAN DEFAULT FALSE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-
-    // Activity log table for per-user recent activity
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS activity_log (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL,
-        type TEXT,
-        title TEXT,
-        details JSONB,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-
-    // Schedules table for supervisor-created schedules
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS schedules (
-        id SERIAL PRIMARY KEY,
-        nurse TEXT,
-        title TEXT,
-        station TEXT,
-        date TEXT,
-        start_time TEXT,
-        end_time TEXT,
-        note TEXT,
-        created_by_user_id INTEGER,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-    
-    // Add any additional tables or schema changes here
-    
-    console.log('Database schema verified/updated successfully');
-  } catch (error) {
-    console.error('Error ensuring database schema:', error);
-    throw error; // Re-throw to prevent app from starting with invalid schema
-  }
-    // Ensure station column exists for older deployments
-    await pool.query(`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS station TEXT;`);
-
-    // Laboratory tests table
-    await pool.query(`
+    // Create lab_tests table if not exists
+    await client.query(`
       CREATE TABLE IF NOT EXISTS lab_tests (
         id SERIAL PRIMARY KEY,
         test_name TEXT NOT NULL,
@@ -238,39 +135,159 @@ async function ensureSchema() {
         status TEXT,
         date TEXT,
         notes TEXT,
-        created_by_user_id INTEGER,
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-    // Ensure columns exist for older deployments
-    await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS category TEXT;`);
-    await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS status TEXT;`);
-    await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS date TEXT;`);
-    await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS notes TEXT;`);
-    await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+      )`
+    );
 
-    // Lab records table (for finalized/recorded lab results metadata)
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS lab_records (
+    // Create inventory table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS inventory (
         id SERIAL PRIMARY KEY,
-        test_name TEXT NOT NULL,
-        patient TEXT NOT NULL,
-        category TEXT,
-        status TEXT,
-        date TEXT,
-        notes TEXT,
-        created_by_user_id INTEGER,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-    await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS category TEXT;`);
-    await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS status TEXT;`);
-    await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS date TEXT;`);
-    await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS notes TEXT;`);
-    await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+        generic_name TEXT NOT NULL,
+        brand_name TEXT,
+        category TEXT NOT NULL,
+        stock INTEGER NOT NULL DEFAULT 0,
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_by_name TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`
+    );
 
-    // Add avatar_uri column if not exists
-    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_uri TEXT;`);
+    // Create appointments compatibility table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS appointment (
+        id SERIAL PRIMARY KEY,
+        full_name TEXT,
+        date TEXT,
+        time TEXT,
+        status TEXT,
+        appointment_id INTEGER UNIQUE
+      )`
+    );
+
+    // Create notifications table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT,
+        is_read BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`
+    );
+
+    // Create prescriptions table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS prescriptions (
+        id SERIAL PRIMARY KEY,
+        patient_name TEXT NOT NULL,
+        doctor_name TEXT NOT NULL,
+        medicine TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        dosage_strength TEXT,
+        description TEXT,
+        status TEXT DEFAULT 'pending',
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`
+    );
+
+    // Add any missing columns to existing tables
+    await client.query(`
+      DO $$
+      BEGIN
+        -- Add missing columns to appointments
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'appointments' AND column_name = 'created_by_user_id') THEN
+          ALTER TABLE appointments ADD COLUMN created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        END IF;
+        
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'appointments' AND column_name = 'created_by_name') THEN
+          ALTER TABLE appointments ADD COLUMN created_by_name TEXT;
+        END IF;
+        
+        -- Add missing columns to lab_tests
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'lab_tests' AND column_name = 'created_by_user_id') THEN
+          ALTER TABLE lab_tests ADD COLUMN created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        END IF;
+        
+        -- Add missing columns to inventory
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'inventory' AND column_name = 'created_by_user_id') THEN
+          ALTER TABLE inventory ADD COLUMN created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        END IF;
+        
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'inventory' AND column_name = 'created_by_name') THEN
+          ALTER TABLE inventory ADD COLUMN created_by_name TEXT;
+        END IF;
+      END
+      $$`);
+
+    console.log('✅ Database schema verified/updated successfully');
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('❌ Error ensuring database schema:', error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Initialize the server
+async function initializeServer() {
+  try {
+    // Ensure database schema is up to date
+    await ensureSchema();
+    console.log('✅ Database initialization complete');
+    
+    // Start the server
+    const PORT = process.env.PORT || 5000;
+    return new Promise((resolve) => {
+      const server = app.listen(PORT, () => {
+        console.log(`🚀 Server running on port ${PORT}`);
+        console.log('✅ Server started successfully');
+        resolve(server);
+      });
+    });
+  } catch (error) {
+    console.error('❌ Failed to initialize server:', error);
+    process.exit(1);
+  }
+}
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ message: 'Welcome to the CareFlow API' });
+});
+
+// Error handling middleware (must be after all other middleware and routes)
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal Server Error' });
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err);
+  process.exit(1);
+});
+
+// Only start the server if this file is run directly (not when imported as a module)
+if (require.main === module) {
+  initializeServer().catch(error => {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  });
+}
+
+// Export the app and initializeServer for testing
+module.exports = { app, initializeServer };
 
     // Appointments table for doctor scheduling
     await pool.query(`
@@ -301,10 +318,10 @@ await pool.query(`
   );
 `);
 // Make sure new columns exist if table was created earlier
-await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS date TEXT;`);
-await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS time TEXT;`);
-await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS status TEXT;`);
-await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS appointment_id INTEGER UNIQUE;`);
+    await client.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS date TEXT;`);
+    await client.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS time TEXT;`);
+    await client.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS status TEXT;`);
+    await client.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS appointment_id INTEGER UNIQUE;`);
 
 // Pharmacy inventory table for medicines
 await pool.query(`
@@ -402,89 +419,45 @@ await pool.query(`
 
 // Add any additional tables or schema changes here
 
-// Ensure station column exists for older deployments
-await pool.query(`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS station TEXT;`);
-
-// Laboratory tests table
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS lab_tests (
-    id SERIAL PRIMARY KEY,
-    test_name TEXT NOT NULL,
-    patient TEXT NOT NULL,
-    category TEXT,
-    status TEXT,
-    date TEXT,
-    notes TEXT,
-    created_by_user_id INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-  );
-`);
-
-console.log('✅ Database schema verified/updated successfully');
-await client.query('COMMIT');
-} catch (error) {
-  await client.query('ROLLBACK');
-  console.error('❌ Error ensuring database schema:', error);
-  throw error; // Re-throw to prevent app from starting with invalid schema
-} finally {
-  client.release();
+// Only start the server if this file is run directly
+if (require.main === module) {
+  initializeServer().catch(error => {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  });
 }
 
-// Laboratory tests table
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS lab_tests (
-    id SERIAL PRIMARY KEY,
-    test_name TEXT NOT NULL,
-    patient TEXT NOT NULL,
-    category TEXT,
-    status TEXT,
-    date TEXT,
-    notes TEXT,
-    created_by_user_id INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-  );
-`);
-// Ensure columns exist for older deployments
-await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS category TEXT;`);
-await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS status TEXT;`);
-await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS date TEXT;`);
-await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS notes TEXT;`);
-await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal Server Error' });
+});
 
-// Lab records table (for finalized/recorded lab results metadata)
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS lab_records (
-    id SERIAL PRIMARY KEY,
-    test_name TEXT NOT NULL,
-    patient TEXT NOT NULL,
-    category TEXT,
-    status TEXT,
-    date TEXT,
-    notes TEXT,
-    created_by_user_id INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-  );
-`);
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err);
+  process.exit(1);
+});
 
-try {
-  // Ensure columns exist for older deployments
-  await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS category TEXT;`);
-  await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS status TEXT;`);
-  await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS date TEXT;`);
-  await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS notes TEXT;`);
-  await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+// ===== Routes =====
 
-  console.log("✅ Database schema ensured");
-} catch (err) {
-  console.error("❌ Schema error:", err);
-}
+// Activity API
+app.get('/api/activity', async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+    const result = await pool.query(
+      'SELECT id, type, title, details, created_at FROM activity_log WHERE user_id = $1 ORDER BY created_at DESC',
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/activity error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
-// Initialize server after ensuring schema
-(async () => {
-  await ensureSchema();
-
-  // Routes
-  // ===== Activity API =====
+// Routes
+// ===== Activity API =====
   app.get('/api/activity', async (req, res) => {
     try {
       const userId = getUserId(req);
@@ -1632,7 +1605,4 @@ try {
     }
   });
 
-  // ✅ Start server only after DB check
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-})();
+  // Start the server
