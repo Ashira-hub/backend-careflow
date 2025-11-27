@@ -210,6 +210,14 @@ async function ensureSchema() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
+    
+    // Add any additional tables or schema changes here
+    
+    console.log('Database schema verified/updated successfully');
+  } catch (error) {
+    console.error('Error ensuring database schema:', error);
+    throw error; // Re-throw to prevent app from starting with invalid schema
+  }
     // Ensure station column exists for older deployments
     await pool.query(`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS station TEXT;`);
 
@@ -255,26 +263,211 @@ async function ensureSchema() {
     await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
 
     console.log("✅ Database schema ensured");
-  } catch (err) {
-    console.error("❌ Schema error:", err);
-  }
+}
+// Optional profile fields
+await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
+await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;`);
+await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthdate TEXT;`);
+await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT;`);
+await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_uri TEXT;`);
+
+// Appointments table for doctor scheduling
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS appointments (
+    id SERIAL PRIMARY KEY,
+    patient TEXT NOT NULL,
+    date TEXT NOT NULL,
+    time TEXT NOT NULL,
+    notes TEXT,
+    done BOOLEAN DEFAULT FALSE,
+    created_by_name TEXT,
+    created_by_user_id INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+`);
+// Add missing column if table already existed previously without it
+await pool.query(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS created_by_name TEXT;`);
+await pool.query(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+
+// Compatibility table (as shown in your DB UI): store full_name, date, time, status
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS appointment (
+    full_name TEXT,
+    date TEXT,
+    time TEXT,
+    status TEXT,
+    appointment_id INTEGER UNIQUE
+  );
+`);
+// Make sure new columns exist if table was created earlier
+await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS date TEXT;`);
+await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS time TEXT;`);
+await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS status TEXT;`);
+await pool.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS appointment_id INTEGER UNIQUE;`);
+
+// Pharmacy inventory table for medicines
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS inventory (
+    id SERIAL PRIMARY KEY,
+    category TEXT,
+    brand_name TEXT,
+    generic_name TEXT NOT NULL,
+    dosage_type TEXT,
+    strength TEXT,
+    unit TEXT,
+    expiration_date TEXT,
+    stock INTEGER DEFAULT 0,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+`);
+// Ensure stock column exists for earlier deployments
+await pool.query(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 0;`);
+
+// Profile table for storing user profile information
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS profile (
+    id SERIAL PRIMARY KEY,
+    fullname TEXT,
+    role TEXT,
+    email TEXT,
+    phone TEXT,
+    address TEXT,
+    gender TEXT,
+    birthdate TEXT,
+    avatar_uri TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_edited TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+`);
+await pool.query(`ALTER TABLE profile ADD COLUMN IF NOT EXISTS avatar_uri TEXT;`);
+
+// Prescriptions table for storing prescriptions
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS prescription (
+    id SERIAL PRIMARY KEY,
+    doctor_name TEXT NOT NULL,
+    patient_name TEXT NOT NULL,
+    medicine TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    dosage_strength TEXT,
+    description TEXT,
+    created_by_user_id INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+`);
+await pool.query(`ALTER TABLE prescription ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+await pool.query(`ALTER TABLE prescription ADD COLUMN IF NOT EXISTS status TEXT;`);
+
+// Notifications table for user-targeted notifications
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT,
+    read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+`);
+
+// Activity log table for per-user recent activity
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS activity_log (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    type TEXT,
+    title TEXT,
+    details JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+`);
+
+// Schedules table for supervisor-created schedules
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS schedules (
+    id SERIAL PRIMARY KEY,
+    nurse TEXT,
+    title TEXT,
+    station TEXT,
+    date TEXT,
+    start_time TEXT,
+    end_time TEXT,
+    note TEXT,
+    created_by_user_id INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+`);
+// Add any additional tables or schema changes here
+
+console.log('Database schema verified/updated successfully');
+} catch (error) {
+console.error('Error ensuring database schema:', error);
+throw error; // Re-throw to prevent app from starting with invalid schema
 }
 
-// ✅ Initialize server after ensuring schema
+// Ensure station column exists for older deployments
+await pool.query(`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS station TEXT;`);
+
+// Laboratory tests table
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS lab_tests (
+    id SERIAL PRIMARY KEY,
+    test_name TEXT NOT NULL,
+    patient TEXT NOT NULL,
+    category TEXT,
+    status TEXT,
+    date TEXT,
+    notes TEXT,
+    created_by_user_id INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+`);
+// Ensure columns exist for older deployments
+await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS category TEXT;`);
+await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS status TEXT;`);
+await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS date TEXT;`);
+await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS notes TEXT;`);
+await pool.query(`ALTER TABLE lab_tests ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+
+// Lab records table (for finalized/recorded lab results metadata)
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS lab_records (
+    id SERIAL PRIMARY KEY,
+    test_name TEXT NOT NULL,
+    patient TEXT NOT NULL,
+    category TEXT,
+    status TEXT,
+    date TEXT,
+    notes TEXT,
+    created_by_user_id INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+`);
+await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS category TEXT;`);
+await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS status TEXT;`);
+await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS date TEXT;`);
+await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS notes TEXT;`);
+await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+
+console.log("✅ Database schema ensured");
+} catch (err) {
+console.error("❌ Schema error:", err);
+}
+
+// Initialize server after ensuring schema
 (async () => {
   await ensureSchema();
 
-  // 🟩 Routes
+  // Routes
   // ===== Activity API =====
-  // List recent activity for current user
   app.get('/api/activity', async (req, res) => {
     try {
       const userId = getUserId(req);
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const limit = Math.max(1, Math.min(200, Number(req.query?.limit) || 50));
       const result = await pool.query(
-        'SELECT id, type, title, details, created_at FROM activity_log WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
-        [userId, limit]
+        'SELECT id, type, title, details, created_at FROM activity_log WHERE user_id = $1 ORDER BY created_at DESC',
+        [userId]
       );
       res.json(result.rows);
     } catch (err) {
@@ -310,7 +503,7 @@ async function ensureSchema() {
     }
   });
 
-  // ===== Laboratory Records API =====
+  // Laboratory Records API
   // Create a new lab record
   app.post('/api/lab-records', async (req, res) => {
     try {
@@ -330,7 +523,7 @@ async function ensureSchema() {
     } catch (err) {
       console.error('POST /api/lab-records error:', err);
       res.status(500).json({ message: 'Server error' });
-    } 
+    }
   });
 
   // List lab records for current user
@@ -352,7 +545,7 @@ async function ensureSchema() {
     }
   });
 
-  // ===== Laboratory Tests API =====
+  // Laboratory Tests API
   // Create a new lab test
   app.post('/api/lab-tests', async (req, res) => {
     try {
@@ -442,7 +635,7 @@ async function ensureSchema() {
     }
   });
 
-  // ===== Supervisor Schedules API =====
+  // Supervisor Schedules API
   // Create schedule
   app.post('/api/schedules', async (req, res) => {
     try {
@@ -554,7 +747,7 @@ async function ensureSchema() {
     }
   });
 
-  // ===== Notifications API =====
+  // Notifications API
   // List notifications for current user
   app.get('/api/notifications', async (req, res) => {
     try {
@@ -603,6 +796,7 @@ async function ensureSchema() {
       res.status(500).json({ message: 'Server error' });
     }
   });
+
   app.get("/users", async (req, res) => {
     try {
       const result = await pool.query(
@@ -675,7 +869,7 @@ async function ensureSchema() {
     }
   });
 
-  // ===== Pharmacy Inventory API =====
+  // Pharmacy Inventory API
   app.post('/api/inventory', async (req, res) => {
     try {
       const {
@@ -775,7 +969,7 @@ async function ensureSchema() {
     }
   });
 
-  // ===== Patient Records API (for Doctor Patient Records screen) =====
+  // Patient Records API (for Doctor Patient Records screen)
   // Ensure table for storing patient record entries (appointment completions, etc.)
   try {
     await pool.query(`
@@ -848,7 +1042,7 @@ async function ensureSchema() {
     }
   });
 
-  // ===== Doctor Appointments API =====
+  // Doctor Appointments API
   // Create appointment
   app.post('/api/appointments', async (req, res) => {
     try {
@@ -946,7 +1140,7 @@ async function ensureSchema() {
     }
   });
 
-  // ===== Admin Manage Users API =====
+  // Admin Manage Users API
   // List users (mobile expects fields: id, name, email, role, active)
   app.get("/api/users", async (req, res) => {
     try {
@@ -1029,11 +1223,9 @@ async function ensureSchema() {
          RETURNING id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri, created_at, last_edited`,
         [cleanName, cleanEmail, cleanRole, cleanPhone, cleanAddress, cleanBirthdate, cleanGender, avatar_uri || null, id]
       );
+      
       if (result.rowCount === 0) return res.status(404).json({ message: "Profile not found" });
       res.json(result.rows[0]);
-    } catch (err) {
-      console.error("PUT /api/profile/:id error:", err);
-
     } catch (err) {
       console.error("PUT /api/profile/:id error:", err);
       res.status(500).json({ message: "Server error updating profile" });
