@@ -70,6 +70,13 @@ async function ensureSchema() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE;`);
     // Ensure password_hash exists for credential storage
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;`);
+    
+    // Add optional profile fields if they don't exist
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthdate TEXT;`);
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT;`);
+    
     // Remove legacy unique constraint on role to allow multiple users per role
     try {
       await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_key;`);
@@ -262,17 +269,11 @@ async function ensureSchema() {
     await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS notes TEXT;`);
     await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
 
-    console.log("✅ Database schema ensured");
-}
-// Optional profile fields
-await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;`);
-await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;`);
-await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS birthdate TEXT;`);
-await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT;`);
-await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_uri TEXT;`);
+    // Add avatar_uri column if not exists
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_uri TEXT;`);
 
-// Appointments table for doctor scheduling
-await pool.query(`
+    // Appointments table for doctor scheduling
+    await pool.query(`
   CREATE TABLE IF NOT EXISTS appointments (
     id SERIAL PRIMARY KEY,
     patient TEXT NOT NULL,
@@ -398,16 +399,36 @@ await pool.query(`
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   );
 `);
-// Add any additional tables or schema changes here
 
-console.log('Database schema verified/updated successfully');
-} catch (error) {
-console.error('Error ensuring database schema:', error);
-throw error; // Re-throw to prevent app from starting with invalid schema
-}
+// Add any additional tables or schema changes here
 
 // Ensure station column exists for older deployments
 await pool.query(`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS station TEXT;`);
+
+// Laboratory tests table
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS lab_tests (
+    id SERIAL PRIMARY KEY,
+    test_name TEXT NOT NULL,
+    patient TEXT NOT NULL,
+    category TEXT,
+    status TEXT,
+    date TEXT,
+    notes TEXT,
+    created_by_user_id INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  );
+`);
+
+console.log('✅ Database schema verified/updated successfully');
+await client.query('COMMIT');
+} catch (error) {
+  await client.query('ROLLBACK');
+  console.error('❌ Error ensuring database schema:', error);
+  throw error; // Re-throw to prevent app from starting with invalid schema
+} finally {
+  client.release();
+}
 
 // Laboratory tests table
 await pool.query(`
