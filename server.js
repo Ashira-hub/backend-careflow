@@ -1033,31 +1033,136 @@ async function ensureSchema() {
       res.json(result.rows[0]);
     } catch (err) {
       console.error("PUT /api/profile/:id error:", err);
-      res.status(500).json({ message: "Database error" });
+
+    } catch (err) {
+      console.error("PUT /api/profile/:id error:", err);
+      res.status(500).json({ message: "Server error updating profile" });
     }
   });
 
-  // Create user
-  app.post("/api/users", async (req, res) => {
+  // User registration endpoint
+  app.post("/api/users/register", async (req, res) => {
+    const client = await pool.connect();
+    
     try {
-      const { name, email, role, active = true, password } = req.body || {};
-      if (!name || !email || !role || !password) {
-        return res.status(400).json({ message: "Missing required fields" });
+      await client.query('BEGIN');
+      
+      const { fullName, role, email, password } = req.body || {};
+
+      // Input validation
+      if (!fullName || !role || !email || !password) {
+        return res.status(400).json({ 
+          success: false,
+          message: 'All fields are required: fullName, role, email, password' 
+        });
       }
-      const normalizedEmail = String(email).toLowerCase().trim();
-      const existing = await pool.query("SELECT id FROM users WHERE email = $1", [normalizedEmail]);
-      if (existing.rowCount > 0) {
-        return res.status(409).json({ message: "Email already exists" });
+
+      // Validate role
+      const allowedRoles = ['doctor', 'patient'];
+      const normalizedRole = role.toLowerCase();
+      if (!allowedRoles.includes(normalizedRole)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid role. Must be either "doctor" or "patient"'
+        });
       }
-      const password_hash = await bcrypt.hash(String(password), 10);
-      const insert = await pool.query(
-        "INSERT INTO users (full_name, role, email, active, password_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id, full_name AS name, role, email, active",
-        [name, role, normalizedEmail, Boolean(active), password_hash]
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide a valid email address'
+        });
+      }
+
+      // Check password strength
+      if (password.length < 6) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password must be at least 6 characters long'
+        });
+      }
+
+      // Check if user already exists
+      const existingUser = await client.query(
+        'SELECT id FROM users WHERE LOWER(email) = LOWER($1)', 
+        [email]
       );
-      res.status(201).json(insert.rows[0]);
-    } catch (err) {
-      console.error("POST /api/users error:", err);
-      res.status(500).json({ message: err?.message || "Server error" });
+      
+      if (existingUser.rows.length > 0) {
+        return res.status(409).json({ 
+          success: false,
+          message: 'A user with this email already exists' 
+        });
+      }
+
+      // Hash password with bcrypt
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+
+      // Insert new user with additional fields
+      const result = await client.query(
+        `INSERT INTO users (
+          full_name, 
+          email, 
+          password_hash, 
+          role, 
+          active,
+          created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, full_name, email, role, created_at`,
+        [
+          fullName.trim(),
+          email.toLowerCase().trim(),
+          hashedPassword,
+          normalizedRole,
+          true,
+          new Date().toISOString()
+        ]
+      );
+
+      const newUser = result.rows[0];
+      
+      // Log the registration
+      await logActivity(newUser.id, 'user_registered', 'New user registered', {
+        role: normalizedRole,
+        email: email.toLowerCase()
+      });
+
+      await client.query('COMMIT');
+      
+      res.status(201).json({ 
+        success: true, 
+        message: 'Registration successful',
+        user: {
+          id: newUser.id,
+          fullName: newUser.full_name,
+          email: newUser.email,
+          role: newUser.role,
+          createdAt: newUser.created_at
+        }
+      });
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Registration error:', error);
+      
+      // Handle specific database errors
+      if (error.code === '23505') { // Unique violation
+        return res.status(409).json({
+          success: false,
+          message: 'A user with this email already exists'
+        });
+      }
+      
+      res.status(500).json({ 
+        success: false,
+        message: 'An error occurred during registration',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    } finally {
+      client.release();
     }
   });
 
