@@ -1,12 +1,12 @@
 // server.js
-import express from "express";
-import pkg from "pg";
-import cors from "cors";
-import dotenv from "dotenv";
-import bcrypt from "bcryptjs";
+import express from 'express';
+import pg from 'pg';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import bcrypt from 'bcryptjs';
 
+const { Pool } = pg;
 dotenv.config();
-const { Pool } = pkg;
 
 const app = express();
 app.use(cors());
@@ -195,6 +195,54 @@ async function ensureSchema() {
       )`
     );
 
+    // Lab records table (for finalized/recorded lab results metadata)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS lab_records (
+        id SERIAL PRIMARY KEY,
+        test_name TEXT NOT NULL,
+        patient TEXT NOT NULL,
+        category TEXT,
+        status TEXT,
+        date TEXT,
+        notes TEXT,
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
+    // Ensure all necessary columns exist for older deployments
+    await client.query(`
+      DO $$
+      BEGIN
+        -- Ensure lab_records table has all required columns
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'lab_records' AND column_name = 'category') THEN
+          ALTER TABLE lab_records ADD COLUMN category TEXT;
+        END IF;
+        
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'lab_records' AND column_name = 'status') THEN
+          ALTER TABLE lab_records ADD COLUMN status TEXT;
+        END IF;
+        
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'lab_records' AND column_name = 'date') THEN
+          ALTER TABLE lab_records ADD COLUMN date TEXT;
+        END IF;
+        
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'lab_records' AND column_name = 'notes') THEN
+          ALTER TABLE lab_records ADD COLUMN notes TEXT;
+        END IF;
+        
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'lab_records' AND column_name = 'created_by_user_id') THEN
+          ALTER TABLE lab_records ADD COLUMN created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        END IF;
+      END
+      $$;
+    `);
+
     // Add any missing columns to existing tables
     await client.query(`
       DO $$
@@ -278,8 +326,8 @@ process.on('unhandledRejection', (err) => {
   process.exit(1);
 });
 
-// Only start the server if this file is run directly (not when imported as a module)
-if (require.main === module) {
+// Start the server if this file is run directly
+if (process.env.NODE_ENV !== 'test') {
   initializeServer().catch(error => {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
@@ -287,174 +335,8 @@ if (require.main === module) {
 }
 
 // Export the app and initializeServer for testing
-module.exports = { app, initializeServer };
-
-    // Appointments table for doctor scheduling
-    await pool.query(`
-  CREATE TABLE IF NOT EXISTS appointments (
-    id SERIAL PRIMARY KEY,
-    patient TEXT NOT NULL,
-    date TEXT NOT NULL,
-    time TEXT NOT NULL,
-    notes TEXT,
-    done BOOLEAN DEFAULT FALSE,
-    created_by_name TEXT,
-    created_by_user_id INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-  );
-`);
-// Add missing column if table already existed previously without it
-await pool.query(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS created_by_name TEXT;`);
-await pool.query(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
-
-// Compatibility table (as shown in your DB UI): store full_name, date, time, status
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS appointment (
-    full_name TEXT,
-    date TEXT,
-    time TEXT,
-    status TEXT,
-    appointment_id INTEGER UNIQUE
-  );
-`);
-// Make sure new columns exist if table was created earlier
-    await client.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS date TEXT;`);
-    await client.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS time TEXT;`);
-    await client.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS status TEXT;`);
-    await client.query(`ALTER TABLE appointment ADD COLUMN IF NOT EXISTS appointment_id INTEGER UNIQUE;`);
-
-// Pharmacy inventory table for medicines
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS inventory (
-    id SERIAL PRIMARY KEY,
-    category TEXT,
-    brand_name TEXT,
-    generic_name TEXT NOT NULL,
-    dosage_type TEXT,
-    strength TEXT,
-    unit TEXT,
-    expiration_date TEXT,
-    stock INTEGER DEFAULT 0,
-    description TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-  );
-`);
-// Ensure stock column exists for earlier deployments
-await pool.query(`ALTER TABLE inventory ADD COLUMN IF NOT EXISTS stock INTEGER DEFAULT 0;`);
-
-// Profile table for storing user profile information
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS profile (
-    id SERIAL PRIMARY KEY,
-    fullname TEXT,
-    role TEXT,
-    email TEXT,
-    phone TEXT,
-    address TEXT,
-    gender TEXT,
-    birthdate TEXT,
-    avatar_uri TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_edited TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-  );
-`);
-await pool.query(`ALTER TABLE profile ADD COLUMN IF NOT EXISTS avatar_uri TEXT;`);
-
-// Prescriptions table for storing prescriptions
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS prescription (
-    id SERIAL PRIMARY KEY,
-    doctor_name TEXT NOT NULL,
-    patient_name TEXT NOT NULL,
-    medicine TEXT NOT NULL,
-    quantity INTEGER NOT NULL,
-    dosage_strength TEXT,
-    description TEXT,
-    created_by_user_id INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-  );
-`);
-await pool.query(`ALTER TABLE prescription ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
-await pool.query(`ALTER TABLE prescription ADD COLUMN IF NOT EXISTS status TEXT;`);
-
-// Notifications table for user-targeted notifications
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS notifications (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    message TEXT,
-    read BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-  );
-`);
-
-// Activity log table for per-user recent activity
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS activity_log (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    type TEXT,
-    title TEXT,
-    details JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-  );
-`);
-
-// Schedules table for supervisor-created schedules
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS schedules (
-    id SERIAL PRIMARY KEY,
-    nurse TEXT,
-    title TEXT,
-    station TEXT,
-    date TEXT,
-    start_time TEXT,
-    end_time TEXT,
-    note TEXT,
-    created_by_user_id INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-  );
-`);
-
-// Add any additional tables or schema changes here
-
-// Only start the server if this file is run directly
-if (require.main === module) {
-  initializeServer().catch(error => {
-    console.error('❌ Failed to start server:', error);
-    process.exit(1);
-  });
-}
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal Server Error' });
-});
-
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
-  process.exit(1);
-});
-
-// ===== Routes =====
-
-// Activity API
-app.get('/api/activity', async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-    const result = await pool.query(
-      'SELECT id, type, title, details, created_at FROM activity_log WHERE user_id = $1 ORDER BY created_at DESC',
-      [userId]
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error('GET /api/activity error:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+export { app, initializeServer };
+export default app;
 
 // Routes
 // ===== Activity API =====
