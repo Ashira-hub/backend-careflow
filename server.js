@@ -465,15 +465,18 @@ await pool.query(`
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   );
 `);
-await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS category TEXT;`);
-await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS status TEXT;`);
-await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS date TEXT;`);
-await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS notes TEXT;`);
-await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
 
-console.log("✅ Database schema ensured");
+try {
+  // Ensure columns exist for older deployments
+  await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS category TEXT;`);
+  await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS status TEXT;`);
+  await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS date TEXT;`);
+  await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS notes TEXT;`);
+  await pool.query(`ALTER TABLE lab_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
+
+  console.log("✅ Database schema ensured");
 } catch (err) {
-console.error("❌ Schema error:", err);
+  console.error("❌ Schema error:", err);
 }
 
 // Initialize server after ensuring schema
