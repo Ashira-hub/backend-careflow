@@ -1,9 +1,9 @@
 // server.js
-import express from 'express';
-import pg from 'pg';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import bcrypt from 'bcryptjs';
+import express from "express";
+import pg from "pg";
+import cors from "cors";
+import dotenv from "dotenv";
+import bcrypt from "bcryptjs";
 
 const { Pool } = pg;
 dotenv.config();
@@ -20,7 +20,8 @@ function getUserId(req) {
     const auth = h["authorization"]; // supports "Bearer <userId>"
     let id = null;
     if (xu !== undefined) id = Number(xu);
-    else if (typeof auth === 'string' && auth.startsWith('Bearer ')) id = Number(auth.slice(7));
+    else if (typeof auth === "string" && auth.startsWith("Bearer "))
+      id = Number(auth.slice(7));
     if (!Number.isFinite(id)) return null;
     return id;
   } catch {
@@ -44,20 +45,25 @@ async function logActivity(userId, type, title, details) {
   try {
     if (!Number.isFinite(Number(userId))) return;
     await pool.query(
-      'INSERT INTO activity_log (user_id, type, title, details) VALUES ($1, $2, $3, $4)',
-      [Number(userId), type || null, title || null, details ? JSON.stringify(details) : null]
+      "INSERT INTO activity_log (user_id, type, title, details) VALUES ($1, $2, $3, $4)",
+      [
+        Number(userId),
+        type || null,
+        title || null,
+        details ? JSON.stringify(details) : null,
+      ]
     );
   } catch (e) {
-    console.warn('activity log failed:', e?.message);
+    console.warn("activity log failed:", e?.message);
   }
 }
 
 // Function to ensure the database schema exists
 async function ensureSchema() {
   const client = await pool.connect();
-  
+
   try {
-    await client.query('BEGIN');
+    await client.query("BEGIN");
 
     // Create users table if not exists
     await client.query(`
@@ -75,8 +81,7 @@ async function ensureSchema() {
         active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      )`
-    );
+      )`);
 
     // Create activity_log table if not exists
     await client.query(`
@@ -87,8 +92,7 @@ async function ensureSchema() {
         title TEXT NOT NULL,
         details TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      )`
-    );
+      )`);
 
     // Create patients table if not exists
     await client.query(`
@@ -107,8 +111,7 @@ async function ensureSchema() {
         allergies TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      )`
-    );
+      )`);
 
     // Create appointments table if not exists
     await client.query(`
@@ -122,8 +125,7 @@ async function ensureSchema() {
         created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_by_name TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      )`
-    );
+      )`);
 
     // Create lab_tests table if not exists
     await client.query(`
@@ -137,8 +139,7 @@ async function ensureSchema() {
         notes TEXT,
         created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      )`
-    );
+      )`);
 
     // Create inventory table if not exists
     await client.query(`
@@ -152,8 +153,7 @@ async function ensureSchema() {
         created_by_name TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      )`
-    );
+      )`);
 
     // Create appointments compatibility table if not exists
     await client.query(`
@@ -164,8 +164,7 @@ async function ensureSchema() {
         time TEXT,
         status TEXT,
         appointment_id INTEGER UNIQUE
-      )`
-    );
+      )`);
 
     // Create notifications table if not exists
     await client.query(`
@@ -176,8 +175,7 @@ async function ensureSchema() {
         message TEXT,
         is_read BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      )`
-    );
+      )`);
 
     // Create prescriptions table if not exists
     await client.query(`
@@ -192,8 +190,7 @@ async function ensureSchema() {
         status TEXT DEFAULT 'pending',
         created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      )`
-    );
+      )`);
 
     // Lab records table (for finalized/recorded lab results metadata)
     await client.query(`
@@ -277,11 +274,11 @@ async function ensureSchema() {
       END
       $$`);
 
-    console.log('✅ Database schema verified/updated successfully');
-    await client.query('COMMIT');
+    console.log("✅ Database schema verified/updated successfully");
+    await client.query("COMMIT");
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('❌ Error ensuring database schema:', error);
+    await client.query("ROLLBACK");
+    console.error("❌ Error ensuring database schema:", error);
     throw error;
   } finally {
     client.release();
@@ -293,43 +290,43 @@ async function initializeServer() {
   try {
     // Ensure database schema is up to date
     await ensureSchema();
-    console.log('✅ Database initialization complete');
-    
+    console.log("✅ Database initialization complete");
+
     // Start the server
     const PORT = process.env.PORT || 5000;
     return new Promise((resolve) => {
       const server = app.listen(PORT, () => {
         console.log(`🚀 Server running on port ${PORT}`);
-        console.log('✅ Server started successfully');
+        console.log("✅ Server started successfully");
         resolve(server);
       });
     });
   } catch (error) {
-    console.error('❌ Failed to initialize server:', error);
+    console.error("❌ Failed to initialize server:", error);
     process.exit(1);
   }
 }
 
 // Root endpoint
-app.get('/', (req, res) => {
-  res.json({ message: 'Welcome to the CareFlow API' });
+app.get("/", (req, res) => {
+  res.json({ message: "Welcome to the CareFlow API" });
 });
 
 // Error handling middleware (must be after all other middleware and routes)
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal Server Error' });
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Internal Server Error" });
 });
 
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled Rejection:", err);
   process.exit(1);
 });
 
 // Start the server if this file is run directly
-if (process.env.NODE_ENV !== 'test') {
-  initializeServer().catch(error => {
-    console.error('❌ Failed to start server:', error);
+if (process.env.NODE_ENV !== "test") {
+  initializeServer().catch((error) => {
+    console.error("❌ Failed to start server:", error);
     process.exit(1);
   });
 }
@@ -340,228 +337,293 @@ export default app;
 
 // Routes
 // ===== Activity API =====
-  app.get('/api/activity', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const result = await pool.query(
-        'SELECT id, type, title, details, created_at FROM activity_log WHERE user_id = $1 ORDER BY created_at DESC',
-        [userId]
-      );
-      res.json(result.rows);
-    } catch (err) {
-      console.error('GET /api/activity error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+app.get("/api/activity", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const result = await pool.query(
+      "SELECT id, type, title, details, created_at FROM activity_log WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/activity error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // List prescriptions (optionally filter by status)
-  app.get('/api/prescriptions', async (req, res) => {
-    try {
-      const status = typeof req.query?.status === 'string' ? String(req.query.status).trim().toLowerCase() : null;
-      let result;
-      if (status) {
-        result = await pool.query(
-          `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_by_user_id, created_at
+// List prescriptions (optionally filter by status)
+app.get("/api/prescriptions", async (req, res) => {
+  try {
+    const status =
+      typeof req.query?.status === "string"
+        ? String(req.query.status).trim().toLowerCase()
+        : null;
+    let result;
+    if (status) {
+      result = await pool.query(
+        `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_by_user_id, created_at
            FROM prescription
            WHERE LOWER(COALESCE(status,'')) = $1
            ORDER BY created_at DESC`,
-          [status]
-        );
-      } else {
-        result = await pool.query(
-          `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_by_user_id, created_at
+        [status]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_by_user_id, created_at
            FROM prescription
            ORDER BY created_at DESC`
-        );
-      }
-      res.json(result.rows);
-    } catch (err) {
-      console.error('GET /api/prescriptions error:', err);
-      res.status(500).json({ message: 'Server error' });
+      );
     }
-  });
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/prescriptions error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Laboratory Records API
-  // Create a new lab record
-  app.post('/api/lab-records', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { test_name, patient, category, status, date, notes } = req.body || {};
-      if (!test_name || !patient) return res.status(400).json({ message: 'Missing required fields' });
-      const insert = await pool.query(
-        `INSERT INTO lab_records (test_name, patient, category, status, date, notes, created_by_user_id)
+// Laboratory Records API
+// Create a new lab record
+app.post("/api/lab-records", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { test_name, patient, category, status, date, notes } =
+      req.body || {};
+    if (!test_name || !patient)
+      return res.status(400).json({ message: "Missing required fields" });
+    const insert = await pool.query(
+      `INSERT INTO lab_records (test_name, patient, category, status, date, notes, created_by_user_id)
          VALUES ($1,$2,$3,$4,$5,$6,$7)
          RETURNING id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
-        [String(test_name).trim(), String(patient).trim(), category || null, status || null, date || null, notes || null, userId]
-      );
-      const row = insert.rows[0];
-      logActivity(userId, 'records', `Lab record added: ${row.test_name} • ${row.patient}`, row);
-      res.status(201).json(row);
-    } catch (err) {
-      console.error('POST /api/lab-records error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      [
+        String(test_name).trim(),
+        String(patient).trim(),
+        category || null,
+        status || null,
+        date || null,
+        notes || null,
+        userId,
+      ]
+    );
+    const row = insert.rows[0];
+    logActivity(
+      userId,
+      "records",
+      `Lab record added: ${row.test_name} • ${row.patient}`,
+      row
+    );
+    res.status(201).json(row);
+  } catch (err) {
+    console.error("POST /api/lab-records error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // List lab records for current user
-  app.get('/api/lab-records', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const result = await pool.query(
-        `SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
+// List lab records for current user
+app.get("/api/lab-records", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const result = await pool.query(
+      `SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
          FROM lab_records
          WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
          ORDER BY id DESC`,
-        [userId]
-      );
-      res.json(result.rows);
-    } catch (err) {
-      console.error('GET /api/lab-records error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/lab-records error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Laboratory Tests API
-  // Create a new lab test
-  app.post('/api/lab-tests', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { test_name, patient, category, status, date, notes } = req.body || {};
-      if (!test_name || !patient) return res.status(400).json({ message: 'Missing required fields' });
-      const insert = await pool.query(
-        `INSERT INTO lab_tests (test_name, patient, category, status, date, notes, created_by_user_id)
+// Laboratory Tests API
+// Create a new lab test
+app.post("/api/lab-tests", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { test_name, patient, category, status, date, notes } =
+      req.body || {};
+    if (!test_name || !patient)
+      return res.status(400).json({ message: "Missing required fields" });
+    const insert = await pool.query(
+      `INSERT INTO lab_tests (test_name, patient, category, status, date, notes, created_by_user_id)
          VALUES ($1,$2,$3,$4,$5,$6,$7)
          RETURNING id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
-        [String(test_name).trim(), String(patient).trim(), category || null, status || null, date || null, notes || null, userId]
-      );
-      const row = insert.rows[0];
-      // Mirror into lab_records so records reflect tests
-      try {
-        await pool.query(
-          `INSERT INTO lab_records (test_name, patient, category, status, date, notes, created_by_user_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [row.test_name, row.patient, row.category || null, row.status || null, row.date || null, row.notes || null, userId]
-        );
-      } catch (e) {
-        console.warn('mirror lab_test to lab_records failed:', e?.message);
-      }
-      // Log activity
-      logActivity(userId, 'lab', `Lab test added: ${row.test_name} • ${row.patient}`, row);
-      res.status(201).json(row);
-    } catch (err) {
-      console.error('POST /api/lab-tests error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-
-  // List lab tests for the current user
-  app.get('/api/lab-tests', async (req, res) => {
+      [
+        String(test_name).trim(),
+        String(patient).trim(),
+        category || null,
+        status || null,
+        date || null,
+        notes || null,
+        userId,
+      ]
+    );
+    const row = insert.rows[0];
+    // Mirror into lab_records so records reflect tests
     try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const result = await pool.query(
-        `SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
+      await pool.query(
+        `INSERT INTO lab_records (test_name, patient, category, status, date, notes, created_by_user_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          row.test_name,
+          row.patient,
+          row.category || null,
+          row.status || null,
+          row.date || null,
+          row.notes || null,
+          userId,
+        ]
+      );
+    } catch (e) {
+      console.warn("mirror lab_test to lab_records failed:", e?.message);
+    }
+    // Log activity
+    logActivity(
+      userId,
+      "lab",
+      `Lab test added: ${row.test_name} • ${row.patient}`,
+      row
+    );
+    res.status(201).json(row);
+  } catch (err) {
+    console.error("POST /api/lab-tests error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// List lab tests for the current user
+app.get("/api/lab-tests", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const result = await pool.query(
+      `SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
          FROM lab_tests
          WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
          ORDER BY id DESC`,
-        [userId]
-      );
-      res.json(result.rows);
-    } catch (err) {
-      console.error('GET /api/lab-tests error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/lab-tests error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Update a lab test status (and mirror into lab_records)
-  app.put('/api/lab-tests/:id/status', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { id } = req.params;
-      const { status } = req.body || {};
-      if (typeof status !== 'string' || !status.trim()) return res.status(400).json({ message: 'Missing status' });
-      const clean = String(status).trim();
-      const upd = await pool.query(
-        `UPDATE lab_tests
+// Update a lab test status (and mirror into lab_records)
+app.put("/api/lab-tests/:id/status", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { id } = req.params;
+    const { status } = req.body || {};
+    if (typeof status !== "string" || !status.trim())
+      return res.status(400).json({ message: "Missing status" });
+    const clean = String(status).trim();
+    const upd = await pool.query(
+      `UPDATE lab_tests
          SET status = $1
          WHERE id = $2 AND (created_by_user_id = $3 OR created_by_user_id IS NULL)
          RETURNING id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
-        [clean, id, userId]
-      );
-      if (upd.rowCount === 0) return res.status(404).json({ message: 'Lab test not found' });
-      const row = upd.rows[0];
-      // Mirror update into lab_records by matching core identity fields
-      try {
-        await pool.query(
-          `UPDATE lab_records
+      [clean, id, userId]
+    );
+    if (upd.rowCount === 0)
+      return res.status(404).json({ message: "Lab test not found" });
+    const row = upd.rows[0];
+    // Mirror update into lab_records by matching core identity fields
+    try {
+      await pool.query(
+        `UPDATE lab_records
            SET status = $1
            WHERE test_name = $2 AND patient = $3 AND (date = $4 OR $4 IS NULL) AND (created_by_user_id = $5 OR created_by_user_id IS NULL)`,
-          [clean, row.test_name, row.patient, row.date || null, userId]
-        );
-      } catch (e) {
-        console.warn('mirror status to lab_records failed:', e?.message);
-      }
-      logActivity(userId, 'lab', `Lab test status updated: ${row.test_name} • ${row.patient} -> ${clean}`, { id: row.id, status: clean });
-      res.json(row);
-    } catch (err) {
-      console.error('PUT /api/lab-tests/:id/status error:', err);
-      res.status(500).json({ message: 'Server error' });
+        [clean, row.test_name, row.patient, row.date || null, userId]
+      );
+    } catch (e) {
+      console.warn("mirror status to lab_records failed:", e?.message);
     }
-  });
+    logActivity(
+      userId,
+      "lab",
+      `Lab test status updated: ${row.test_name} • ${row.patient} -> ${clean}`,
+      { id: row.id, status: clean }
+    );
+    res.json(row);
+  } catch (err) {
+    console.error("PUT /api/lab-tests/:id/status error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Supervisor Schedules API
-  // Create schedule
-  app.post('/api/schedules', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { nurse, title, station, date, startTime, endTime, note } = req.body || {};
-      if (!title || !date) return res.status(400).json({ message: 'Missing required fields' });
-      const insert = await pool.query(
-        `INSERT INTO schedules (nurse, title, station, date, start_time, end_time, note, created_by_user_id)
+// Supervisor Schedules API
+// Create schedule
+app.post("/api/schedules", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { nurse, title, station, date, startTime, endTime, note } =
+      req.body || {};
+    if (!title || !date)
+      return res.status(400).json({ message: "Missing required fields" });
+    const insert = await pool.query(
+      `INSERT INTO schedules (nurse, title, station, date, start_time, end_time, note, created_by_user_id)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          RETURNING id, nurse, title, station, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
-        [nurse || null, String(title).trim(), station || null, String(date).trim(), startTime || null, endTime || null, note || null, userId]
-      );
-      logActivity(userId, 'schedule', `Schedule created: ${title} • ${date}`, insert.rows[0]);
-      res.status(201).json(insert.rows[0]);
-    } catch (err) {
-      console.error('POST /api/schedules error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      [
+        nurse || null,
+        String(title).trim(),
+        station || null,
+        String(date).trim(),
+        startTime || null,
+        endTime || null,
+        note || null,
+        userId,
+      ]
+    );
+    logActivity(
+      userId,
+      "schedule",
+      `Schedule created: ${title} • ${date}`,
+      insert.rows[0]
+    );
+    res.status(201).json(insert.rows[0]);
+  } catch (err) {
+    console.error("POST /api/schedules error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // List schedules for current user
-  app.get('/api/schedules', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const result = await pool.query(
-        `SELECT id, nurse, title, station, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
+// List schedules for current user
+app.get("/api/schedules", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const result = await pool.query(
+      `SELECT id, nurse, title, station, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
          FROM schedules WHERE created_by_user_id = $1 ORDER BY id DESC`,
-        [userId]
-      );
-      res.json(result.rows);
-    } catch (err) {
-      console.error('GET /api/schedules error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/schedules error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Update schedule
-  app.put('/api/schedules/:id', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { id } = req.params;
-      const { nurse, title, station, date, startTime, endTime, note } = req.body || {};
-      const result = await pool.query(
-        `UPDATE schedules
+// Update schedule
+app.put("/api/schedules/:id", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { id } = req.params;
+    const { nurse, title, station, date, startTime, endTime, note } =
+      req.body || {};
+    const result = await pool.query(
+      `UPDATE schedules
          SET nurse = COALESCE($1, nurse),
              title = COALESCE($2, title),
              station = COALESCE($3, station),
@@ -571,252 +633,313 @@ export default app;
              note = COALESCE($7, note)
          WHERE id = $8 AND created_by_user_id = $9
          RETURNING id, nurse, title, station, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
-        [nurse ?? null, title ?? null, station ?? null, date ?? null, startTime ?? null, endTime ?? null, note ?? null, id, userId]
-      );
-      if (result.rowCount === 0) return res.status(404).json({ message: 'Schedule not found' });
-      logActivity(userId, 'schedule_update', `Schedule updated: ${result.rows[0].title} • ${result.rows[0].date}`, result.rows[0]);
-      res.json(result.rows[0]);
-    } catch (err) {
-      console.error('PUT /api/schedules/:id error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      [
+        nurse ?? null,
+        title ?? null,
+        station ?? null,
+        date ?? null,
+        startTime ?? null,
+        endTime ?? null,
+        note ?? null,
+        id,
+        userId,
+      ]
+    );
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "Schedule not found" });
+    logActivity(
+      userId,
+      "schedule_update",
+      `Schedule updated: ${result.rows[0].title} • ${result.rows[0].date}`,
+      result.rows[0]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("PUT /api/schedules/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Delete schedule
-  app.delete('/api/schedules/:id', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { id } = req.params;
-      const del = await pool.query('DELETE FROM schedules WHERE id = $1 AND created_by_user_id = $2', [id, userId]);
-      if (del.rowCount === 0) return res.status(404).json({ message: 'Schedule not found' });
-      logActivity(userId, 'schedule_delete', `Schedule deleted: ${id}`, { id });
-      res.status(204).send();
-    } catch (err) {
-      console.error('DELETE /api/schedules/:id error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+// Delete schedule
+app.delete("/api/schedules/:id", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { id } = req.params;
+    const del = await pool.query(
+      "DELETE FROM schedules WHERE id = $1 AND created_by_user_id = $2",
+      [id, userId]
+    );
+    if (del.rowCount === 0)
+      return res.status(404).json({ message: "Schedule not found" });
+    logActivity(userId, "schedule_delete", `Schedule deleted: ${id}`, { id });
+    res.status(204).send();
+  } catch (err) {
+    console.error("DELETE /api/schedules/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Update prescription status (e.g., accepted by pharmacy) and notify doctor
-  app.put('/api/prescription/:id/status', async (req, res) => {
+// Update prescription status (e.g., accepted by pharmacy) and notify doctor
+app.put("/api/prescription/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body || {};
+    const clean =
+      typeof status === "string" ? status.trim().toLowerCase() : null;
+    if (!clean) return res.status(400).json({ message: "Missing status" });
+    const upd = await pool.query(
+      "UPDATE prescription SET status = $1 WHERE id = $2 RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id, status, created_at",
+      [clean, id]
+    );
+    if (upd.rowCount === 0)
+      return res.status(404).json({ message: "Prescription not found" });
+    const row = upd.rows[0];
     try {
-      const { id } = req.params;
-      const { status } = req.body || {};
-      const clean = typeof status === 'string' ? status.trim().toLowerCase() : null;
-      if (!clean) return res.status(400).json({ message: 'Missing status' });
-      const upd = await pool.query(
-        'UPDATE prescription SET status = $1 WHERE id = $2 RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id, status, created_at',
-        [clean, id]
-      );
-      if (upd.rowCount === 0) return res.status(404).json({ message: 'Prescription not found' });
-      const row = upd.rows[0];
-      try {
-        if (clean === 'accepted' && row.created_by_user_id) {
-          const title = 'Prescription Accepted';
-          const message = `Pharmacy accepted prescription for ${row.patient_name} • ${row.medicine}`;
-          await pool.query('INSERT INTO notifications (user_id, title, message) VALUES ($1, $2, $3)', [row.created_by_user_id, title, message]);
-          logActivity(row.created_by_user_id, 'prescription', message, { id: row.id, status: clean });
-        }
-      } catch (e) { console.warn('notify doctor failed:', e?.message); }
-      res.json(row);
-    } catch (err) {
-      console.error('PUT /api/prescription/:id/status error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-
-  // Notifications API
-  // List notifications for current user
-  app.get('/api/notifications', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const limit = Math.max(1, Math.min(200, Number(req.query?.limit) || 100));
-      const result = await pool.query(
-        'SELECT id, title, message, read, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
-        [userId, limit]
-      );
-      res.json(result.rows);
-    } catch (err) {
-      console.error('GET /api/notifications error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-
-  // Mark a notification as read
-  app.put('/api/notifications/:id/read', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { id } = req.params;
-      const upd = await pool.query('UPDATE notifications SET read = TRUE WHERE id = $1 AND user_id = $2 RETURNING id, title, message, read, created_at', [id, userId]);
-      if (upd.rowCount === 0) return res.status(404).json({ message: 'Notification not found' });
-      res.json(upd.rows[0]);
-    } catch (err) {
-      console.error('PUT /api/notifications/:id/read error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-
-  // Add a custom activity item for current user
-  app.post('/api/activity', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { type, title, details } = req.body || {};
-      const ins = await pool.query(
-        'INSERT INTO activity_log (user_id, type, title, details) VALUES ($1, $2, $3, $4) RETURNING id, type, title, details, created_at',
-        [userId, type || null, title || null, details ? JSON.stringify(details) : null]
-      );
-      res.status(201).json(ins.rows[0]);
-    } catch (err) {
-      console.error('POST /api/activity error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-
-  app.get("/users", async (req, res) => {
-    try {
-      const result = await pool.query(
-        "SELECT id, full_name, role, email, active, created_at FROM users ORDER BY id DESC"
-      );
-      res.json(result.rows);
-    } catch (err) {
-      console.error("GET /users error:", err);
-      res.status(500).json({ error: "Database error" });
-    }
-  });
-
-  // Update inventory details (name/category/stock)
-  app.put('/api/inventory/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      // Accept either split fields or a combined name ("Generic (Brand)")
-      let { genericName, brandName, category, stock } = req.body || {};
-      if (!genericName && typeof req.body?.name === 'string') {
-        const name = String(req.body.name);
-        const m = name.match(/^\s*(.*?)\s*(?:\((.*?)\))?\s*$/);
-        genericName = m ? (m[1] || '').trim() : name.trim();
-        brandName = m ? (m[2] || '').trim() || null : null;
+      if (clean === "accepted" && row.created_by_user_id) {
+        const title = "Prescription Accepted";
+        const message = `Pharmacy accepted prescription for ${row.patient_name} • ${row.medicine}`;
+        await pool.query(
+          "INSERT INTO notifications (user_id, title, message) VALUES ($1, $2, $3)",
+          [row.created_by_user_id, title, message]
+        );
+        logActivity(row.created_by_user_id, "prescription", message, {
+          id: row.id,
+          status: clean,
+        });
       }
-      const result = await pool.query(
-        `UPDATE inventory
+    } catch (e) {
+      console.warn("notify doctor failed:", e?.message);
+    }
+    res.json(row);
+  } catch (err) {
+    console.error("PUT /api/prescription/:id/status error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Notifications API
+// List notifications for current user
+app.get("/api/notifications", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const limit = Math.max(1, Math.min(200, Number(req.query?.limit) || 100));
+    const result = await pool.query(
+      "SELECT id, title, message, read, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2",
+      [userId, limit]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/notifications error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Mark a notification as read
+app.put("/api/notifications/:id/read", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { id } = req.params;
+    const upd = await pool.query(
+      "UPDATE notifications SET read = TRUE WHERE id = $1 AND user_id = $2 RETURNING id, title, message, read, created_at",
+      [id, userId]
+    );
+    if (upd.rowCount === 0)
+      return res.status(404).json({ message: "Notification not found" });
+    res.json(upd.rows[0]);
+  } catch (err) {
+    console.error("PUT /api/notifications/:id/read error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Add a custom activity item for current user
+app.post("/api/activity", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { type, title, details } = req.body || {};
+    const ins = await pool.query(
+      "INSERT INTO activity_log (user_id, type, title, details) VALUES ($1, $2, $3, $4) RETURNING id, type, title, details, created_at",
+      [
+        userId,
+        type || null,
+        title || null,
+        details ? JSON.stringify(details) : null,
+      ]
+    );
+    res.status(201).json(ins.rows[0]);
+  } catch (err) {
+    console.error("POST /api/activity error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.get("/users", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, full_name, role, email, active, created_at FROM users ORDER BY id DESC"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /users error:", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+// Update inventory details (name/category/stock)
+app.put("/api/inventory/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Accept either split fields or a combined name ("Generic (Brand)")
+    let { genericName, brandName, category, stock } = req.body || {};
+    if (!genericName && typeof req.body?.name === "string") {
+      const name = String(req.body.name);
+      const m = name.match(/^\s*(.*?)\s*(?:\((.*?)\))?\s*$/);
+      genericName = m ? (m[1] || "").trim() : name.trim();
+      brandName = m ? (m[2] || "").trim() || null : null;
+    }
+    const result = await pool.query(
+      `UPDATE inventory
          SET generic_name = COALESCE($1, generic_name),
              brand_name = COALESCE($2, brand_name),
              category = COALESCE($3, category),
              stock = COALESCE($4, stock)
          WHERE id = $5
          RETURNING id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at`,
-        [genericName ?? null, brandName ?? null, category ?? null, (Number.isFinite(Number(stock)) ? Number(stock) : null), id]
+      [
+        genericName ?? null,
+        brandName ?? null,
+        category ?? null,
+        Number.isFinite(Number(stock)) ? Number(stock) : null,
+        id,
+      ]
+    );
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "Inventory item not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("PUT /api/inventory/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Patch stock only
+app.patch("/api/inventory/:id/stock", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stock, delta } = req.body || {};
+    if (typeof stock !== "number" && typeof delta !== "number") {
+      return res
+        .status(400)
+        .json({ message: "Provide stock or delta as a number" });
+    }
+    let result;
+    if (typeof delta === "number") {
+      result = await pool.query(
+        `UPDATE inventory SET stock = GREATEST(0, stock + $1) WHERE id = $2
+           RETURNING id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at`,
+        [delta, id]
       );
-      if (result.rowCount === 0) return res.status(404).json({ message: 'Inventory item not found' });
-      res.json(result.rows[0]);
-    } catch (err) {
-      console.error('PUT /api/inventory/:id error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-
-  // Patch stock only
-  app.patch('/api/inventory/:id/stock', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { stock, delta } = req.body || {};
-      if (typeof stock !== 'number' && typeof delta !== 'number') {
-        return res.status(400).json({ message: 'Provide stock or delta as a number' });
-      }
-      let result;
-      if (typeof delta === 'number') {
-        result = await pool.query(
-          `UPDATE inventory SET stock = GREATEST(0, stock + $1) WHERE id = $2
+    } else {
+      result = await pool.query(
+        `UPDATE inventory SET stock = GREATEST(0, $1) WHERE id = $2
            RETURNING id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at`,
-          [delta, id]
-        );
-      } else {
-        result = await pool.query(
-          `UPDATE inventory SET stock = GREATEST(0, $1) WHERE id = $2
-           RETURNING id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at`,
-          [Number(stock), id]
-        );
-      }
-      if (result.rowCount === 0) return res.status(404).json({ message: 'Inventory item not found' });
-      res.json(result.rows[0]);
-    } catch (err) {
-      console.error('PATCH /api/inventory/:id/stock error:', err);
-      res.status(500).json({ message: 'Server error' });
+        [Number(stock), id]
+      );
     }
-  });
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "Inventory item not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("PATCH /api/inventory/:id/stock error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Pharmacy Inventory API
-  app.post('/api/inventory', async (req, res) => {
-    try {
-      const {
-        category,
-        brandName,
-        genericName,
-        dosageType,
-        strength,
-        unit,
-        expirationDate,
-        stock,
-        description,
-      } = req.body || {};
-      if (!genericName) return res.status(400).json({ message: 'Missing genericName' });
-      const result = await pool.query(
-        `INSERT INTO inventory (category, brand_name, generic_name, dosage_type, strength, unit, expiration_date, stock, description)
+// Pharmacy Inventory API
+app.post("/api/inventory", async (req, res) => {
+  try {
+    const {
+      category,
+      brandName,
+      genericName,
+      dosageType,
+      strength,
+      unit,
+      expirationDate,
+      stock,
+      description,
+    } = req.body || {};
+    if (!genericName)
+      return res.status(400).json({ message: "Missing genericName" });
+    const result = await pool.query(
+      `INSERT INTO inventory (category, brand_name, generic_name, dosage_type, strength, unit, expiration_date, stock, description)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          RETURNING id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at`,
-        [category || null, brandName || null, String(genericName).trim(), dosageType || null, strength || null, unit || null, expirationDate || null, Number.isFinite(Number(stock)) ? Number(stock) : 0, description || null]
-      );
-      res.status(201).json(result.rows[0]);
-    } catch (err) {
-      console.error('POST /api/inventory error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      [
+        category || null,
+        brandName || null,
+        String(genericName).trim(),
+        dosageType || null,
+        strength || null,
+        unit || null,
+        expirationDate || null,
+        Number.isFinite(Number(stock)) ? Number(stock) : 0,
+        description || null,
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("POST /api/inventory error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  app.get('/api/inventory', async (_req, res) => {
-    try {
-      const result = await pool.query(
-        `SELECT id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at FROM inventory ORDER BY created_at DESC`
-      );
-      res.json(result.rows);
-    } catch (err) {
-      console.error('GET /api/inventory error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+app.get("/api/inventory", async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at FROM inventory ORDER BY created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/inventory error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Return all patient records (with timestamps and fields) for reporting
-  app.get('/api/patient-records/all', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const result = await pool.query(
-        `SELECT id, patient, date, time, notes, doctor, medicine, dosage, created_at
+// Return all patient records (with timestamps and fields) for reporting
+app.get("/api/patient-records/all", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const result = await pool.query(
+      `SELECT id, patient, date, time, notes, doctor, medicine, dosage, created_at
          FROM patient_records
          WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
          ORDER BY created_at DESC`,
-        [userId]
-      );
-      res.json(result.rows);
-    } catch (err) {
-      console.error('GET /api/patient-records/all error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/patient-records/all error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Merge into latest record for a patient (avoid duplicates)
-  app.put('/api/patient-records/latest', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { patient, doctor, medicine, dosage, notes, date, time } = req.body || {};
-      if (!patient) return res.status(400).json({ message: 'Missing patient' });
-      // Try update latest row for this patient
-      const update = await pool.query(
-        `WITH latest AS (
+// Merge into latest record for a patient (avoid duplicates)
+app.put("/api/patient-records/latest", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { patient, doctor, medicine, dosage, notes, date, time } =
+      req.body || {};
+    if (!patient) return res.status(400).json({ message: "Missing patient" });
+    // Try update latest row for this patient
+    const update = await pool.query(
+      `WITH latest AS (
            SELECT id FROM patient_records WHERE patient = $1 AND created_by_user_id = $2 ORDER BY created_at DESC LIMIT 1
          )
          UPDATE patient_records pr
@@ -829,29 +952,52 @@ export default app;
          FROM latest
          WHERE pr.id = latest.id
          RETURNING pr.id, pr.patient, pr.date, pr.time, pr.notes, pr.doctor, pr.medicine, pr.dosage, pr.created_at`,
-        [String(patient).trim(), userId, doctor ?? null, medicine ?? null, dosage ?? null, notes ?? null, date ?? null, time ?? null]
-      );
-      if (update.rowCount > 0) return res.json(update.rows[0]);
-      // If no existing, insert new
-      const insert = await pool.query(
-        'INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, notes, doctor, medicine, dosage, created_at',
-        [String(patient).trim(), date ?? null, time ?? null, notes ?? null, doctor ?? null, medicine ?? null, dosage ?? null, userId]
-      );
-      // Log activity for upsert
-      logActivity(userId, 'records', `Patient record updated: ${patient}`, {
-        patient, doctor, medicine, dosage, notes, id: insert.rows[0]?.id
-      });
-      res.json(insert.rows[0]);
-    } catch (err) {
-      console.error('PUT /api/patient-records/latest error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      [
+        String(patient).trim(),
+        userId,
+        doctor ?? null,
+        medicine ?? null,
+        dosage ?? null,
+        notes ?? null,
+        date ?? null,
+        time ?? null,
+      ]
+    );
+    if (update.rowCount > 0) return res.json(update.rows[0]);
+    // If no existing, insert new
+    const insert = await pool.query(
+      "INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, notes, doctor, medicine, dosage, created_at",
+      [
+        String(patient).trim(),
+        date ?? null,
+        time ?? null,
+        notes ?? null,
+        doctor ?? null,
+        medicine ?? null,
+        dosage ?? null,
+        userId,
+      ]
+    );
+    // Log activity for upsert
+    logActivity(userId, "records", `Patient record updated: ${patient}`, {
+      patient,
+      doctor,
+      medicine,
+      dosage,
+      notes,
+      id: insert.rows[0]?.id,
+    });
+    res.json(insert.rows[0]);
+  } catch (err) {
+    console.error("PUT /api/patient-records/latest error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Patient Records API (for Doctor Patient Records screen)
-  // Ensure table for storing patient record entries (appointment completions, etc.)
-  try {
-    await pool.query(`
+// Patient Records API (for Doctor Patient Records screen)
+// Ensure table for storing patient record entries (appointment completions, etc.)
+try {
+  await pool.query(`
       CREATE TABLE IF NOT EXISTS patient_records (
         id SERIAL PRIMARY KEY,
         patient TEXT NOT NULL,
@@ -865,230 +1011,327 @@ export default app;
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
-    // Ensure new columns exist for existing deployments
-    await pool.query(`ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS doctor TEXT;`);
-    await pool.query(`ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS medicine TEXT;`);
-    await pool.query(`ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS dosage TEXT;`);
-    await pool.query(`ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`);
-  } catch (e) {
-    console.error('ensure patient_records table error:', e);
+  // Ensure new columns exist for existing deployments
+  await pool.query(
+    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS doctor TEXT;`
+  );
+  await pool.query(
+    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS medicine TEXT;`
+  );
+  await pool.query(
+    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS dosage TEXT;`
+  );
+  await pool.query(
+    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`
+  );
+} catch (e) {
+  console.error("ensure patient_records table error:", e);
+}
+
+// Add a patient record entry
+app.post("/api/patient-records", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const { patient, date, time, notes, doctor, medicine, dosage } =
+      req.body || {};
+    if (!patient) return res.status(400).json({ message: "Missing patient" });
+    const insert = await pool.query(
+      "INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, notes, doctor, medicine, dosage, created_at",
+      [
+        String(patient).trim(),
+        date || null,
+        time || null,
+        notes || null,
+        doctor ? String(doctor).trim() : null,
+        medicine ? String(medicine).trim() : null,
+        dosage ? String(dosage).trim() : null,
+        userId,
+      ]
+    );
+    // Log activity
+    logActivity(userId, "records", `Patient record added: ${patient}`, {
+      patient,
+      doctor,
+      medicine,
+      dosage,
+      notes,
+      id: insert.rows[0]?.id,
+    });
+    res.status(201).json(insert.rows[0]);
+  } catch (err) {
+    console.error("POST /api/patient-records error:", err);
+    res.status(500).json({ message: "Server error" });
   }
+});
 
-  // Add a patient record entry
-  app.post('/api/patient-records', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { patient, date, time, notes, doctor, medicine, dosage } = req.body || {};
-      if (!patient) return res.status(400).json({ message: 'Missing patient' });
-      const insert = await pool.query(
-        'INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, notes, doctor, medicine, dosage, created_at',
-        [String(patient).trim(), date || null, time || null, notes || null, doctor ? String(doctor).trim() : null, medicine ? String(medicine).trim() : null, dosage ? String(dosage).trim() : null, userId]
-      );
-      // Log activity
-      logActivity(userId, 'records', `Patient record added: ${patient}`, {
-        patient, doctor, medicine, dosage, notes, id: insert.rows[0]?.id
-      });
-      res.status(201).json(insert.rows[0]);
-    } catch (err) {
-      console.error('POST /api/patient-records error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-
-  // List distinct patients with latest record timestamp
-  app.get('/api/patient-records', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const ownOnly = String(req.query?.own || '').trim() === '1';
-      const sql = ownOnly
-        ? `SELECT patient, MAX(created_at) AS last_ts
+// List distinct patients with latest record timestamp
+app.get("/api/patient-records", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const ownOnly = String(req.query?.own || "").trim() === "1";
+    const sql = ownOnly
+      ? `SELECT patient, MAX(created_at) AS last_ts
            FROM patient_records
            WHERE created_by_user_id = $1
            GROUP BY patient
            ORDER BY last_ts DESC`
-        : `SELECT patient, MAX(created_at) AS last_ts
+      : `SELECT patient, MAX(created_at) AS last_ts
            FROM patient_records
            WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
            GROUP BY patient
            ORDER BY last_ts DESC`;
-      const result = await pool.query(sql, [userId]);
-      res.json(result.rows.map(r => ({ patient: r.patient, last_ts: r.last_ts })));
-    } catch (err) {
-      console.error('GET /api/patient-records error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+    const result = await pool.query(sql, [userId]);
+    res.json(
+      result.rows.map((r) => ({ patient: r.patient, last_ts: r.last_ts }))
+    );
+  } catch (err) {
+    console.error("GET /api/patient-records error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Doctor Appointments API
-  // Create appointment
-  app.post('/api/appointments', async (req, res) => {
+// Doctor Appointments API
+// Create appointment
+app.post("/api/appointments", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const {
+      patient,
+      date,
+      time,
+      notes,
+      done = false,
+      createdByName,
+    } = req.body || {};
+    if (!patient || !date || !time) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+    const insert = await pool.query(
+      "INSERT INTO appointments (patient, date, time, notes, done, created_by_name, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, patient, date, time, notes, done, created_by_name, created_at",
+      [
+        String(patient).trim(),
+        String(date).trim(),
+        String(time).trim(),
+        notes || null,
+        Boolean(done),
+        createdByName ? String(createdByName).trim() : null,
+        userId,
+      ]
+    );
+    // Also log into patient_records for unified reporting
+    try {
+      await pool.query(
+        "INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        [
+          String(patient).trim(),
+          String(date).trim(),
+          String(time).trim(),
+          notes || null,
+          createdByName ? String(createdByName).trim() : null,
+          null,
+          null,
+          userId,
+        ]
+      );
+    } catch (e) {
+      console.warn("mirror appointment to patient_records failed:", e?.message);
+    }
+    // Also reflect into simplified table for UI: store patient full name, date, time, and status
+    try {
+      const status = Boolean(done) ? "done" : "pending";
+      await pool.query(
+        "INSERT INTO appointment (full_name, date, time, status, appointment_id) VALUES ($1, $2, $3, $4, $5)",
+        [
+          String(patient).trim(),
+          String(date).trim(),
+          String(time).trim(),
+          status,
+          insert.rows[0].id,
+        ]
+      );
+    } catch {}
+    // Log activity
+    logActivity(
+      userId,
+      "appointment",
+      `Appointment created: ${patient} • ${date} ${time}`,
+      {
+        id: insert.rows[0]?.id,
+        patient,
+        date,
+        time,
+        notes,
+        done,
+      }
+    );
+    res.status(201).json(insert.rows[0]);
+  } catch (err) {
+    console.error("POST /api/appointments error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// List appointments (optional)
+app.get("/api/appointments", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const result = await pool.query(
+      "SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE created_by_user_id = $1 ORDER BY id DESC",
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/appointments error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Update appointment
+app.put("/api/appointments/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { patient, date, time, notes, done, createdByName } = req.body || {};
+    const result = await pool.query(
+      "UPDATE appointments SET patient = COALESCE($1, patient), date = COALESCE($2, date), time = COALESCE($3, time), notes = COALESCE($4, notes), done = COALESCE($5, done), created_by_name = COALESCE($6, created_by_name) WHERE id = $7 RETURNING id, patient, date, time, notes, done, created_by_name, created_at",
+      [
+        patient ?? null,
+        date ?? null,
+        time ?? null,
+        notes ?? null,
+        typeof done === "boolean" ? done : null,
+        createdByName ?? null,
+        id,
+      ]
+    );
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "Appointment not found" });
+    const updated = result.rows[0];
+    // Mirror to simplified table by appointment_id
+    try {
+      const status = updated.done ? "done" : "pending";
+      await pool.query(
+        "UPDATE appointment SET full_name = COALESCE($1, full_name), date = COALESCE($2, date), time = COALESCE($3, time), status = $4 WHERE appointment_id = $5",
+        [updated.patient, updated.date, updated.time, status, updated.id]
+      );
+    } catch {}
+    // Log activity
     try {
       const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { patient, date, time, notes, done = false, createdByName } = req.body || {};
-      if (!patient || !date || !time) {
-        return res.status(400).json({ message: 'Missing required fields' });
-      }
-      const insert = await pool.query(
-        'INSERT INTO appointments (patient, date, time, notes, done, created_by_name, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, patient, date, time, notes, done, created_by_name, created_at',
-        [String(patient).trim(), String(date).trim(), String(time).trim(), notes || null, Boolean(done), createdByName ? String(createdByName).trim() : null, userId]
-      );
-      // Also log into patient_records for unified reporting
-      try {
-        await pool.query(
-          'INSERT INTO patient_records (patient, date, time, notes, doctor, medicine, dosage, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-          [String(patient).trim(), String(date).trim(), String(time).trim(), notes || null, createdByName ? String(createdByName).trim() : null, null, null, userId]
+      if (userId)
+        logActivity(
+          userId,
+          "appointment_update",
+          `Appointment updated: ${updated.patient} • ${updated.date} ${updated.time}`,
+          updated
         );
-      } catch (e) {
-        console.warn('mirror appointment to patient_records failed:', e?.message);
-      }
-      // Also reflect into simplified table for UI: store patient full name, date, time, and status
-      try {
-        const status = Boolean(done) ? 'done' : 'pending';
-        await pool.query('INSERT INTO appointment (full_name, date, time, status, appointment_id) VALUES ($1, $2, $3, $4, $5)', [String(patient).trim(), String(date).trim(), String(time).trim(), status, insert.rows[0].id]);
-      } catch {}
-      // Log activity
-      logActivity(userId, 'appointment', `Appointment created: ${patient} • ${date} ${time}`, {
-        id: insert.rows[0]?.id, patient, date, time, notes, done
-      });
-      res.status(201).json(insert.rows[0]);
-    } catch (err) {
-      console.error('POST /api/appointments error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+    } catch {}
+    res.json(updated);
+  } catch (err) {
+    console.error("PUT /api/appointments/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // List appointments (optional)
-  app.get('/api/appointments', async (req, res) => {
+// Delete appointment
+app.delete("/api/appointments/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const del = await pool.query("DELETE FROM appointments WHERE id = $1", [
+      id,
+    ]);
+    if (del.rowCount === 0)
+      return res.status(404).json({ message: "Appointment not found" });
+    // Remove mirror
     try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const result = await pool.query('SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE created_by_user_id = $1 ORDER BY id DESC', [userId]);
-      res.json(result.rows);
-    } catch (err) {
-      console.error('GET /api/appointments error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      await pool.query("DELETE FROM appointment WHERE appointment_id = $1", [
+        id,
+      ]);
+    } catch {}
+    res.status(204).send();
+  } catch (err) {
+    console.error("DELETE /api/appointments/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Update appointment
-  app.put('/api/appointments/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { patient, date, time, notes, done, createdByName } = req.body || {};
-      const result = await pool.query(
-        'UPDATE appointments SET patient = COALESCE($1, patient), date = COALESCE($2, date), time = COALESCE($3, time), notes = COALESCE($4, notes), done = COALESCE($5, done), created_by_name = COALESCE($6, created_by_name) WHERE id = $7 RETURNING id, patient, date, time, notes, done, created_by_name, created_at',
-        [patient ?? null, date ?? null, time ?? null, notes ?? null, typeof done === 'boolean' ? done : null, createdByName ?? null, id]
-      );
-      if (result.rowCount === 0) return res.status(404).json({ message: 'Appointment not found' });
-      const updated = result.rows[0];
-      // Mirror to simplified table by appointment_id
-      try {
-        const status = updated.done ? 'done' : 'pending';
-        await pool.query(
-          'UPDATE appointment SET full_name = COALESCE($1, full_name), date = COALESCE($2, date), time = COALESCE($3, time), status = $4 WHERE appointment_id = $5',
-          [updated.patient, updated.date, updated.time, status, updated.id]
-        );
-      } catch {}
-      // Log activity
-      try {
-        const userId = getUserId(req);
-        if (userId) logActivity(userId, 'appointment_update', `Appointment updated: ${updated.patient} • ${updated.date} ${updated.time}`, updated);
-      } catch {}
-      res.json(updated);
-    } catch (err) {
-      console.error('PUT /api/appointments/:id error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+// Admin Manage Users API
+// List users (mobile expects fields: id, name, email, role, active)
+app.get("/api/users", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, full_name AS name, role, email, active FROM users ORDER BY id DESC"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/users error:", err);
+    res.status(500).json({ message: "Database error" });
+  }
+});
 
-  // Delete appointment
-  app.delete('/api/appointments/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const del = await pool.query('DELETE FROM appointments WHERE id = $1', [id]);
-      if (del.rowCount === 0) return res.status(404).json({ message: 'Appointment not found' });
-      // Remove mirror
-      try { await pool.query('DELETE FROM appointment WHERE appointment_id = $1', [id]); } catch {}
-      res.status(204).send();
-    } catch (err) {
-      console.error('DELETE /api/appointments/:id error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-
-  // Admin Manage Users API
-  // List users (mobile expects fields: id, name, email, role, active)
-  app.get("/api/users", async (req, res) => {
-    try {
-      const result = await pool.query(
-        "SELECT id, full_name AS name, role, email, active FROM users ORDER BY id DESC"
-      );
-      res.json(result.rows);
-    } catch (err) {
-      console.error("GET /api/users error:", err);
-      res.status(500).json({ message: "Database error" });
-    }
-  });
-
-  // Get single user by ID (for profile pages) - checks profile table first, then users table
-  app.get("/api/users/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      // First try to get from profile table
-      let result = await pool.query(
-        "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri FROM profile WHERE id = $1",
+// Get single user by ID (for profile pages) - checks profile table first, then users table
+app.get("/api/users/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    // First try to get from profile table
+    let result = await pool.query(
+      "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri FROM profile WHERE id = $1",
+      [id]
+    );
+    // If not found in profile table, check users table
+    if (result.rowCount === 0) {
+      result = await pool.query(
+        "SELECT id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri FROM users WHERE id = $1",
         [id]
       );
-      // If not found in profile table, check users table
-      if (result.rowCount === 0) {
-        result = await pool.query(
-          "SELECT id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri FROM users WHERE id = $1",
-          [id]
-        );
-      }
-      if (result.rowCount === 0) return res.status(404).json({ message: "User not found" });
-      res.json(result.rows[0]);
-    } catch (err) {
-      console.error("GET /api/users/:id error:", err);
-      res.status(500).json({ message: "Database error" });
     }
-  });
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "User not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("GET /api/users/:id error:", err);
+    res.status(500).json({ message: "Database error" });
+  }
+});
 
-  // Get profile by ID (direct profile table access)
-  app.get("/api/profile/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const result = await pool.query(
-        "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri, created_at, last_edited FROM profile WHERE id = $1",
-        [id]
-      );
-      if (result.rowCount === 0) return res.status(404).json({ message: "Profile not found" });
-      res.json(result.rows[0]);
-    } catch (err) {
-      console.error("GET /api/profile/:id error:", err);
-      res.status(500).json({ message: "Database error" });
-    }
-  });
+// Get profile by ID (direct profile table access)
+app.get("/api/profile/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri, created_at, last_edited FROM profile WHERE id = $1",
+      [id]
+    );
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "Profile not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("GET /api/profile/:id error:", err);
+    res.status(500).json({ message: "Database error" });
+  }
+});
 
-  // Update profile by ID
-  app.put("/api/profile/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { name, email, role, phone, address, birthdate, gender, avatar_uri } = req.body || {};
-      // Convert empty strings to null to avoid PostgreSQL errors
-      const cleanPhone = phone && phone.trim() ? phone.trim() : null;
-      const cleanAddress = address && address.trim() ? address.trim() : null;
-      const cleanBirthdate = birthdate && birthdate.trim() ? birthdate.trim() : null;
-      const cleanGender = gender && gender.trim() ? gender.trim() : null;
-      const cleanName = name && name.trim() ? name.trim() : null;
-      const cleanEmail = email && email.trim() ? email.trim() : null;
-      const cleanRole = role && role.trim() ? role.trim() : null;
-      
-      const result = await pool.query(
-        `UPDATE profile 
+// Update profile by ID
+app.put("/api/profile/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, role, phone, address, birthdate, gender, avatar_uri } =
+      req.body || {};
+    // Convert empty strings to null to avoid PostgreSQL errors
+    const cleanPhone = phone && phone.trim() ? phone.trim() : null;
+    const cleanAddress = address && address.trim() ? address.trim() : null;
+    const cleanBirthdate =
+      birthdate && birthdate.trim() ? birthdate.trim() : null;
+    const cleanGender = gender && gender.trim() ? gender.trim() : null;
+    const cleanName = name && name.trim() ? name.trim() : null;
+    const cleanEmail = email && email.trim() ? email.trim() : null;
+    const cleanRole = role && role.trim() ? role.trim() : null;
+
+    const result = await pool.query(
+      `UPDATE profile 
          SET fullname = COALESCE($1, fullname),
              email = COALESCE($2, email),
              role = COALESCE($3, role),
@@ -1100,81 +1343,92 @@ export default app;
              last_edited = NOW()
          WHERE id = $9
          RETURNING id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri, created_at, last_edited`,
-        [cleanName, cleanEmail, cleanRole, cleanPhone, cleanAddress, cleanBirthdate, cleanGender, avatar_uri || null, id]
-      );
-      
-      if (result.rowCount === 0) return res.status(404).json({ message: "Profile not found" });
-      res.json(result.rows[0]);
-    } catch (err) {
-      console.error("PUT /api/profile/:id error:", err);
-      res.status(500).json({ message: "Server error updating profile" });
+      [
+        cleanName,
+        cleanEmail,
+        cleanRole,
+        cleanPhone,
+        cleanAddress,
+        cleanBirthdate,
+        cleanGender,
+        avatar_uri || null,
+        id,
+      ]
+    );
+
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "Profile not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("PUT /api/profile/:id error:", err);
+    res.status(500).json({ message: "Server error updating profile" });
+  }
+});
+
+// User registration endpoint
+app.post("/api/users/register", async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const { fullName, role, email, password } = req.body || {};
+
+    // Input validation
+    if (!fullName || !role || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required: fullName, role, email, password",
+      });
     }
-  });
 
-  // User registration endpoint
-  app.post("/api/users/register", async (req, res) => {
-    const client = await pool.connect();
-    
-    try {
-      await client.query('BEGIN');
-      
-      const { fullName, role, email, password } = req.body || {};
+    // Validate role
+    const allowedRoles = ["doctor", "patient"];
+    const normalizedRole = role.toLowerCase();
+    if (!allowedRoles.includes(normalizedRole)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid role. Must be either "doctor" or "patient"',
+      });
+    }
 
-      // Input validation
-      if (!fullName || !role || !email || !password) {
-        return res.status(400).json({ 
-          success: false,
-          message: 'All fields are required: fullName, role, email, password' 
-        });
-      }
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address",
+      });
+    }
 
-      // Validate role
-      const allowedRoles = ['doctor', 'patient'];
-      const normalizedRole = role.toLowerCase();
-      if (!allowedRoles.includes(normalizedRole)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid role. Must be either "doctor" or "patient"'
-        });
-      }
+    // Check password strength
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters long",
+      });
+    }
 
-      // Validate email format
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Please provide a valid email address'
-        });
-      }
+    // Check if user already exists
+    const existingUser = await client.query(
+      "SELECT id FROM users WHERE LOWER(email) = LOWER($1)",
+      [email]
+    );
 
-      // Check password strength
-      if (password.length < 6) {
-        return res.status(400).json({
-          success: false,
-          message: 'Password must be at least 6 characters long'
-        });
-      }
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "A user with this email already exists",
+      });
+    }
 
-      // Check if user already exists
-      const existingUser = await client.query(
-        'SELECT id FROM users WHERE LOWER(email) = LOWER($1)', 
-        [email]
-      );
-      
-      if (existingUser.rows.length > 0) {
-        return res.status(409).json({ 
-          success: false,
-          message: 'A user with this email already exists' 
-        });
-      }
+    // Hash password with bcrypt
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
-      // Hash password with bcrypt
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(password, salt);
-
-      // Insert new user with additional fields
-      const result = await client.query(
-        `INSERT INTO users (
+    // Insert new user with additional fields
+    const result = await client.query(
+      `INSERT INTO users (
           full_name, 
           email, 
           password_hash, 
@@ -1183,93 +1437,132 @@ export default app;
           created_at
         ) VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id, full_name, email, role, created_at`,
+      [
+        fullName.trim(),
+        email.toLowerCase().trim(),
+        hashedPassword,
+        normalizedRole,
+        true,
+        new Date().toISOString(),
+      ]
+    );
+
+    const newUser = result.rows[0];
+
+    // Log the registration
+    await logActivity(newUser.id, "user_registered", "New user registered", {
+      role: normalizedRole,
+      email: email.toLowerCase(),
+    });
+
+    await client.query("COMMIT");
+
+    res.status(201).json({
+      success: true,
+      message: "Registration successful",
+      user: {
+        id: newUser.id,
+        fullName: newUser.full_name,
+        email: newUser.email,
+        role: newUser.role,
+        createdAt: newUser.created_at,
+      },
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Registration error:", error);
+
+    // Handle specific database errors
+    if (error.code === "23505") {
+      // Unique violation
+      return res.status(409).json({
+        success: false,
+        message: "A user with this email already exists",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "An error occurred during registration",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Update user
+app.put("/api/users/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      email,
+      role,
+      active,
+      password,
+      phone,
+      address,
+      birthdate,
+      gender,
+      avatar_uri,
+    } = req.body || {};
+    if (!name || !email || !role) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+    const normalizedEmail = String(email).toLowerCase().trim();
+    // If password provided, hash and update in a single query; otherwise keep existing hash
+    let result;
+    if (password) {
+      const password_hash = await bcrypt.hash(String(password), 10);
+      result = await pool.query(
+        "UPDATE users SET full_name = $1, email = $2, role = $3, active = COALESCE($4, active), password_hash = $5, phone = COALESCE($6, phone), address = COALESCE($7, address), birthdate = COALESCE($8, birthdate), gender = COALESCE($9, gender), avatar_uri = COALESCE($10, avatar_uri) WHERE id = $11 RETURNING id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri",
         [
-          fullName.trim(),
-          email.toLowerCase().trim(),
-          hashedPassword,
-          normalizedRole,
-          true,
-          new Date().toISOString()
+          name,
+          normalizedEmail,
+          role,
+          typeof active === "boolean" ? active : null,
+          password_hash,
+          phone ?? null,
+          address ?? null,
+          birthdate ?? null,
+          gender ?? null,
+          avatar_uri ?? null,
+          id,
         ]
       );
-
-      const newUser = result.rows[0];
-      
-      // Log the registration
-      await logActivity(newUser.id, 'user_registered', 'New user registered', {
-        role: normalizedRole,
-        email: email.toLowerCase()
-      });
-
-      await client.query('COMMIT');
-      
-      res.status(201).json({ 
-        success: true, 
-        message: 'Registration successful',
-        user: {
-          id: newUser.id,
-          fullName: newUser.full_name,
-          email: newUser.email,
-          role: newUser.role,
-          createdAt: newUser.created_at
-        }
-      });
-      
-    } catch (error) {
-      await client.query('ROLLBACK');
-      console.error('Registration error:', error);
-      
-      // Handle specific database errors
-      if (error.code === '23505') { // Unique violation
-        return res.status(409).json({
-          success: false,
-          message: 'A user with this email already exists'
-        });
-      }
-      
-      res.status(500).json({ 
-        success: false,
-        message: 'An error occurred during registration',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
-      });
-    } finally {
-      client.release();
+    } else {
+      result = await pool.query(
+        "UPDATE users SET full_name = $1, email = $2, role = $3, active = COALESCE($4, active), phone = COALESCE($5, phone), address = COALESCE($6, address), birthdate = COALESCE($7, birthdate), gender = COALESCE($8, gender), avatar_uri = COALESCE($9, avatar_uri) WHERE id = $10 RETURNING id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri",
+        [
+          name,
+          normalizedEmail,
+          role,
+          typeof active === "boolean" ? active : null,
+          phone ?? null,
+          address ?? null,
+          birthdate ?? null,
+          gender ?? null,
+          avatar_uri ?? null,
+          id,
+        ]
+      );
     }
-  });
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "User not found" });
 
-  // Update user
-  app.put("/api/users/:id", async (req, res) => {
+    // Also sync to profile table (UPSERT to ensure consistency)
     try {
-      const { id } = req.params;
-      const { name, email, role, active, password, phone, address, birthdate, gender, avatar_uri } = req.body || {};
-      if (!name || !email || !role) {
-        return res.status(400).json({ message: "Missing required fields" });
-      }
-      const normalizedEmail = String(email).toLowerCase().trim();
-      // If password provided, hash and update in a single query; otherwise keep existing hash
-      let result;
-      if (password) {
-        const password_hash = await bcrypt.hash(String(password), 10);
-        result = await pool.query(
-          "UPDATE users SET full_name = $1, email = $2, role = $3, active = COALESCE($4, active), password_hash = $5, phone = COALESCE($6, phone), address = COALESCE($7, address), birthdate = COALESCE($8, birthdate), gender = COALESCE($9, gender), avatar_uri = COALESCE($10, avatar_uri) WHERE id = $11 RETURNING id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri",
-          [name, normalizedEmail, role, typeof active === 'boolean' ? active : null, password_hash, phone ?? null, address ?? null, birthdate ?? null, gender ?? null, avatar_uri ?? null, id]
-        );
-      } else {
-        result = await pool.query(
-          "UPDATE users SET full_name = $1, email = $2, role = $3, active = COALESCE($4, active), phone = COALESCE($5, phone), address = COALESCE($6, address), birthdate = COALESCE($7, birthdate), gender = COALESCE($8, gender), avatar_uri = COALESCE($9, avatar_uri) WHERE id = $10 RETURNING id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri",
-          [name, normalizedEmail, role, typeof active === 'boolean' ? active : null, phone ?? null, address ?? null, birthdate ?? null, gender ?? null, avatar_uri ?? null, id]
-        );
-      }
-      if (result.rowCount === 0) return res.status(404).json({ message: "User not found" });
-      
-      // Also sync to profile table (UPSERT to ensure consistency)
-      try {
-        const cleanPhone = phone && String(phone).trim() ? String(phone).trim() : null;
-        const cleanAddress = address && String(address).trim() ? String(address).trim() : null;
-        const cleanBirthdate = birthdate && String(birthdate).trim() ? String(birthdate).trim() : null;
-        const cleanGender = gender && String(gender).trim() ? String(gender).trim() : null;
-        await pool.query(
-          `INSERT INTO profile (id, fullname, email, role, phone, address, birthdate, gender, avatar_uri, last_edited)
+      const cleanPhone =
+        phone && String(phone).trim() ? String(phone).trim() : null;
+      const cleanAddress =
+        address && String(address).trim() ? String(address).trim() : null;
+      const cleanBirthdate =
+        birthdate && String(birthdate).trim() ? String(birthdate).trim() : null;
+      const cleanGender =
+        gender && String(gender).trim() ? String(gender).trim() : null;
+      await pool.query(
+        `INSERT INTO profile (id, fullname, email, role, phone, address, birthdate, gender, avatar_uri, last_edited)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
            ON CONFLICT (id) DO UPDATE SET
              fullname = EXCLUDED.fullname,
@@ -1281,181 +1574,233 @@ export default app;
              gender = COALESCE(EXCLUDED.gender, profile.gender),
              avatar_uri = COALESCE(EXCLUDED.avatar_uri, profile.avatar_uri),
              last_edited = NOW()`,
-          [id, name, normalizedEmail, role, cleanPhone, cleanAddress, cleanBirthdate, cleanGender, avatar_uri ?? null]
-        );
-      } catch (profileErr) {
-        console.warn('Profile sync error:', profileErr);
-        // Don't fail the request if profile sync fails
-      }
-      
-      res.json(result.rows[0]);
-    } catch (err) {
-      console.error("PUT /api/users/:id error:", err);
-      res.status(500).json({ message: err?.message || "Server error" });
-    }
-  });
-
-  // Toggle active
-  app.patch("/api/users/:id/active", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { active } = req.body || {};
-      if (typeof active !== "boolean") {
-        return res.status(400).json({ message: "'active' must be boolean" });
-      }
-      const result = await pool.query(
-        "UPDATE users SET active = $1 WHERE id = $2 RETURNING id, full_name AS name, role, email, active",
-        [active, id]
+        [
+          id,
+          name,
+          normalizedEmail,
+          role,
+          cleanPhone,
+          cleanAddress,
+          cleanBirthdate,
+          cleanGender,
+          avatar_uri ?? null,
+        ]
       );
-      if (result.rowCount === 0) return res.status(404).json({ message: "User not found" });
-      res.json(result.rows[0]);
-    } catch (err) {
-      console.error("PATCH /api/users/:id/active error:", err);
-      res.status(500).json({ message: "Server error" });
+    } catch (profileErr) {
+      console.warn("Profile sync error:", profileErr);
+      // Don't fail the request if profile sync fails
     }
-  });
 
-  // Delete user
-  app.delete("/api/users/:id", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const del = await pool.query("DELETE FROM users WHERE id = $1", [id]);
-      if (del.rowCount === 0) return res.status(404).json({ message: "User not found" });
-      res.status(204).send();
-    } catch (err) {
-      console.error("DELETE /api/users/:id error:", err);
-      res.status(500).json({ message: "Server error" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("PUT /api/users/:id error:", err);
+    res.status(500).json({ message: err?.message || "Server error" });
+  }
+});
+
+// Toggle active
+app.patch("/api/users/:id/active", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { active } = req.body || {};
+    if (typeof active !== "boolean") {
+      return res.status(400).json({ message: "'active' must be boolean" });
     }
-  });
+    const result = await pool.query(
+      "UPDATE users SET active = $1 WHERE id = $2 RETURNING id, full_name AS name, role, email, active",
+      [active, id]
+    );
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "User not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("PATCH /api/users/:id/active error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // ✅ Register route
-  app.post("/api/register", async (req, res) => {
-    try {
-      const { fullName, role, email, password } = req.body || {};
+// Delete user
+app.delete("/api/users/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const del = await pool.query("DELETE FROM users WHERE id = $1", [id]);
+    if (del.rowCount === 0)
+      return res.status(404).json({ message: "User not found" });
+    res.status(204).send();
+  } catch (err) {
+    console.error("DELETE /api/users/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-      if (!fullName || !role || !email || !password) {
-        return res
-          .status(400)
-          .json({ success: false, message: "Missing required fields" });
+// ✅ Register route
+app.post("/api/register", async (req, res) => {
+  try {
+    const { fullName, role, email, password } = req.body || {};
+
+    if (!fullName || !role || !email || !password) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing required fields" });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const existing = await pool.query("SELECT id FROM users WHERE email = $1", [
+      normalizedEmail,
+    ]);
+    if (existing.rowCount > 0) {
+      return res
+        .status(409)
+        .json({ success: false, message: "Email already registered" });
+    }
+
+    const password_hash = await bcrypt.hash(password, 10);
+
+    const insert = await pool.query(
+      "INSERT INTO users (full_name, role, email, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, full_name, role, email, created_at",
+      [fullName, role, normalizedEmail, password_hash]
+    );
+
+    console.log("✅ User registered:", insert.rows[0]);
+
+    res.json({ success: true, user: insert.rows[0] });
+  } catch (err) {
+    console.error("❌ Registration error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ✅ Login route
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password)
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing email or password" });
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const result = await pool.query("SELECT * FROM users WHERE email = $1", [
+      normalizedEmail,
+    ]);
+    if (result.rowCount === 0)
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid credentials" });
+
+    const user = result.rows[0];
+    if (user.active === false) {
+      return res
+        .status(403)
+        .json({
+          success: false,
+          message: "Account is disabled. Contact an administrator.",
+        });
+    }
+    const isValid = await bcrypt.compare(password, user.password_hash);
+    if (!isValid)
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid credentials" });
+
+    delete user.password_hash;
+    res.json({ success: true, user });
+  } catch (err) {
+    console.error("❌ Login error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ===== Prescriptions API =====
+// Create prescription
+app.post("/api/prescription", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    const {
+      patient_name,
+      doctor_name,
+      medicine,
+      quantity,
+      dosage_strength,
+      description,
+    } = req.body || {};
+    if (!patient_name || !doctor_name || !medicine) {
+      return res
+        .status(400)
+        .json({
+          message:
+            "Missing required fields: patient_name, doctor_name, medicine",
+        });
+    }
+    const result = await pool.query(
+      "INSERT INTO prescription (doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at",
+      [
+        String(doctor_name).trim(),
+        String(patient_name).trim(),
+        String(medicine).trim(),
+        Number(quantity) || 0,
+        dosage_strength || null,
+        description || null,
+        userId,
+      ]
+    );
+    // Log activity
+    logActivity(
+      userId,
+      "prescription",
+      `Prescription submitted: ${patient_name} • ${medicine}`,
+      {
+        id: result.rows[0]?.id,
+        patient_name,
+        doctor_name,
+        medicine,
+        quantity,
+        dosage_strength,
       }
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("POST /api/prescription error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-      const normalizedEmail = email.toLowerCase().trim();
-
-      const existing = await pool.query("SELECT id FROM users WHERE email = $1", [
-        normalizedEmail,
-      ]);
-      if (existing.rowCount > 0) {
-        return res
-          .status(409)
-          .json({ success: false, message: "Email already registered" });
-      }
-
-      const password_hash = await bcrypt.hash(password, 10);
-
-      const insert = await pool.query(
-        "INSERT INTO users (full_name, role, email, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, full_name, role, email, created_at",
-        [fullName, role, normalizedEmail, password_hash]
-      );
-
-      console.log("✅ User registered:", insert.rows[0]);
-
-      res.json({ success: true, user: insert.rows[0] });
-    } catch (err) {
-      console.error("❌ Registration error:", err);
-      res.status(500).json({ success: false, message: "Server error" });
+// Get all prescriptions for a specific user (by URL param id)
+app.get("/api/prescription/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = Number(id);
+    if (!Number.isFinite(userId)) {
+      return res.status(400).json({ message: "Invalid user id" });
     }
-  });
+    const result = await pool.query(
+      "SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_at FROM prescription WHERE created_by_user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/prescription/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // ✅ Login route
-  app.post("/api/login", async (req, res) => {
-    try {
-      const { email, password } = req.body || {};
-      if (!email || !password)
-        return res
-          .status(400)
-          .json({ success: false, message: "Missing email or password" });
-
-      const normalizedEmail = email.toLowerCase().trim();
-
-      const result = await pool.query("SELECT * FROM users WHERE email = $1", [
-        normalizedEmail,
-      ]);
-      if (result.rowCount === 0)
-        return res
-          .status(401)
-          .json({ success: false, message: "Invalid credentials" });
-
-      const user = result.rows[0];
-      if (user.active === false) {
-        return res
-          .status(403)
-          .json({ success: false, message: "Account is disabled. Contact an administrator." });
-      }
-      const isValid = await bcrypt.compare(password, user.password_hash);
-      if (!isValid)
-        return res
-          .status(401)
-          .json({ success: false, message: "Invalid credentials" });
-
-      delete user.password_hash;
-      res.json({ success: true, user });
-    } catch (err) {
-      console.error("❌ Login error:", err);
-      res.status(500).json({ success: false, message: "Server error" });
-    }
-  });
-
-  // ===== Prescriptions API =====
-  // Create prescription
-  app.post('/api/prescription', async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
-      const { patient_name, doctor_name, medicine, quantity, dosage_strength, description } = req.body || {};
-      if (!patient_name || !doctor_name || !medicine) {
-        return res.status(400).json({ message: 'Missing required fields: patient_name, doctor_name, medicine' });
-      }
-      const result = await pool.query(
-        'INSERT INTO prescription (doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at',
-        [String(doctor_name).trim(), String(patient_name).trim(), String(medicine).trim(), Number(quantity) || 0, dosage_strength || null, description || null, userId]
-      );
-      // Log activity
-      logActivity(userId, 'prescription', `Prescription submitted: ${patient_name} • ${medicine}`, {
-        id: result.rows[0]?.id, patient_name, doctor_name, medicine, quantity, dosage_strength
-      });
-      res.status(201).json(result.rows[0]);
-    } catch (err) {
-      console.error('POST /api/prescription error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-
-  // Get all prescriptions for a specific user (by URL param id)
-  app.get('/api/prescription/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const userId = Number(id);
-      if (!Number.isFinite(userId)) {
-        return res.status(400).json({ message: 'Invalid user id' });
-      }
-      const result = await pool.query(
-        'SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_at FROM prescription WHERE created_by_user_id = $1 ORDER BY created_at DESC',
-        [userId]
-      );
-      res.json(result.rows);
-    } catch (err) {
-      console.error('GET /api/prescription/:id error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
-
-  // Update prescription
-  app.put('/api/prescription/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { patient_name, doctor_name, medicine, quantity, dosage_strength, description } = req.body || {};
-      const result = await pool.query(
-        `UPDATE prescription 
+// Update prescription
+app.put("/api/prescription/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      patient_name,
+      doctor_name,
+      medicine,
+      quantity,
+      dosage_strength,
+      description,
+    } = req.body || {};
+    const result = await pool.query(
+      `UPDATE prescription 
          SET doctor_name = COALESCE($1, doctor_name),
              patient_name = COALESCE($2, patient_name),
              medicine = COALESCE($3, medicine),
@@ -1464,27 +1809,39 @@ export default app;
              description = COALESCE($6, description)
          WHERE id = $7
          RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at`,
-        [doctor_name ?? null, patient_name ?? null, medicine ?? null, quantity ?? null, dosage_strength ?? null, description ?? null, id]
-      );
-      if (result.rowCount === 0) return res.status(404).json({ message: 'Prescription not found' });
-      res.json(result.rows[0]);
-    } catch (err) {
-      console.error('PUT /api/prescription/:id error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+      [
+        doctor_name ?? null,
+        patient_name ?? null,
+        medicine ?? null,
+        quantity ?? null,
+        dosage_strength ?? null,
+        description ?? null,
+        id,
+      ]
+    );
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "Prescription not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("PUT /api/prescription/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Delete prescription
-  app.delete('/api/prescription/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const del = await pool.query('DELETE FROM prescription WHERE id = $1', [id]);
-      if (del.rowCount === 0) return res.status(404).json({ message: 'Prescription not found' });
-      res.status(204).send();
-    } catch (err) {
-      console.error('DELETE /api/prescription/:id error:', err);
-      res.status(500).json({ message: 'Server error' });
-    }
-  });
+// Delete prescription
+app.delete("/api/prescription/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const del = await pool.query("DELETE FROM prescription WHERE id = $1", [
+      id,
+    ]);
+    if (del.rowCount === 0)
+      return res.status(404).json({ message: "Prescription not found" });
+    res.status(204).send();
+  } catch (err) {
+    console.error("DELETE /api/prescription/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-  // Start the server
+// Start the server
