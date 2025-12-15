@@ -1179,11 +1179,43 @@ app.get("/api/appointments", async (req, res) => {
   try {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    // Determine requester role to tailor the response
+    let role = null;
+    let fullName = null;
+    try {
+      const ures = await pool.query(
+        "SELECT role, full_name FROM users WHERE id = $1",
+        [userId]
+      );
+      if (ures.rowCount > 0) {
+        role =
+          (ures.rows[0]?.role || null) &&
+          String(ures.rows[0].role).toLowerCase();
+        fullName = ures.rows[0]?.full_name || null;
+      }
+    } catch {}
+
+    if (role === "patient") {
+      // Return appointments for this patient by matching patient name (case-insensitive, token-wise)
+      const name = (fullName || "").trim();
+      if (!name) return res.json([]);
+      const tokens = name.toLowerCase().split(/\s+/).filter(Boolean);
+      if (tokens.length === 0) return res.json([]);
+      const where = tokens
+        .map((_, i) => `LOWER(patient) LIKE LOWER($${i + 1})`)
+        .join(" AND ");
+      const params = tokens.map((t) => `%${t}%`);
+      const sql = `SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE ${where} ORDER BY id DESC`;
+      const result = await pool.query(sql, params);
+      return res.json(result.rows);
+    }
+
+    // Default: list appointments created by this user (doctor/other roles)
     const result = await pool.query(
       "SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE created_by_user_id = $1 ORDER BY id DESC",
       [userId]
     );
-    res.json(result.rows);
+    return res.json(result.rows);
   } catch (err) {
     console.error("GET /api/appointments error:", err);
     res.status(500).json({ message: "Server error" });
@@ -1692,12 +1724,10 @@ app.post("/api/login", async (req, res) => {
 
     const user = result.rows[0];
     if (user.active === false) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "Account is disabled. Contact an administrator.",
-        });
+      return res.status(403).json({
+        success: false,
+        message: "Account is disabled. Contact an administrator.",
+      });
     }
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid)
@@ -1728,12 +1758,9 @@ app.post("/api/prescription", async (req, res) => {
       description,
     } = req.body || {};
     if (!patient_name || !doctor_name || !medicine) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "Missing required fields: patient_name, doctor_name, medicine",
-        });
+      return res.status(400).json({
+        message: "Missing required fields: patient_name, doctor_name, medicine",
+      });
     }
     const result = await pool.query(
       "INSERT INTO prescription (doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at",
