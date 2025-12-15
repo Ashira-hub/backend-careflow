@@ -271,6 +271,32 @@ async function ensureSchema() {
                       WHERE table_name = 'inventory' AND column_name = 'created_by_name') THEN
           ALTER TABLE inventory ADD COLUMN created_by_name TEXT;
         END IF;
+
+        -- Add missing profile columns to users
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'users' AND column_name = 'blood_type') THEN
+          ALTER TABLE users ADD COLUMN blood_type TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'users' AND column_name = 'height') THEN
+          ALTER TABLE users ADD COLUMN height TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'users' AND column_name = 'weight') THEN
+          ALTER TABLE users ADD COLUMN weight TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'users' AND column_name = 'allergies') THEN
+          ALTER TABLE users ADD COLUMN allergies TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'users' AND column_name = 'medical_history') THEN
+          ALTER TABLE users ADD COLUMN medical_history TEXT;
+        END IF;
       END
       $$`);
 
@@ -786,6 +812,80 @@ app.get("/users", async (req, res) => {
   } catch (err) {
     console.error("GET /users error:", err);
     res.status(500).json({ error: "Database error" });
+  }
+});
+
+// Update current user's profile
+app.put("/api/users/:id", async (req, res) => {
+  try {
+    const authUserId = getUserId(req);
+    if (!authUserId) return res.status(401).json({ message: "Unauthorized" });
+    const { id } = req.params;
+    if (String(authUserId) !== String(id))
+      return res.status(403).json({ message: "Forbidden" });
+
+    const {
+      full_name,
+      fullName,
+      name,
+      email,
+      phone,
+      address,
+      birthdate,
+      gender,
+      avatar_uri,
+      blood_type,
+      height,
+      weight,
+      allergies,
+      medical_history,
+    } = req.body || {};
+
+    const desiredName =
+      (typeof full_name === "string" && full_name.trim()) ||
+      (typeof fullName === "string" && fullName.trim()) ||
+      (typeof name === "string" && name.trim()) ||
+      null;
+
+    const result = await pool.query(
+      `UPDATE users SET
+         full_name = COALESCE($1, full_name),
+         email = COALESCE($2, email),
+         phone = COALESCE($3, phone),
+         address = COALESCE($4, address),
+         birthdate = COALESCE($5, birthdate),
+         gender = COALESCE($6, gender),
+         avatar_uri = COALESCE($7, avatar_uri),
+         blood_type = COALESCE($8, blood_type),
+         height = COALESCE($9, height),
+         weight = COALESCE($10, weight),
+         allergies = COALESCE($11, allergies),
+         medical_history = COALESCE($12, medical_history),
+         updated_at = NOW()
+       WHERE id = $13
+       RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, role, active, created_at, updated_at`,
+      [
+        desiredName,
+        typeof email === "string" ? email : null,
+        typeof phone === "string" ? phone : null,
+        typeof address === "string" ? address : null,
+        typeof birthdate === "string" ? birthdate : null,
+        typeof gender === "string" ? gender : null,
+        typeof avatar_uri === "string" ? avatar_uri : null,
+        typeof blood_type === "string" ? blood_type : null,
+        typeof height === "string" ? height : null,
+        typeof weight === "string" ? weight : null,
+        typeof allergies === "string" ? allergies : null,
+        typeof medical_history === "string" ? medical_history : null,
+        id,
+      ]
+    );
+    if (result.rowCount === 0)
+      return res.status(404).json({ message: "User not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("PUT /api/users/:id error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
