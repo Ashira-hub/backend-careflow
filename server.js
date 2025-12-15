@@ -1196,16 +1196,23 @@ app.get("/api/appointments", async (req, res) => {
     } catch {}
 
     if (role === "patient") {
-      // Return appointments for this patient by matching patient name (case-insensitive, token-wise)
+      // Return appointments for this patient by matching patient name (case-insensitive):
+      // exact full-name OR any token match
       const name = (fullName || "").trim();
       if (!name) return res.json([]);
       const tokens = name.toLowerCase().split(/\s+/).filter(Boolean);
-      if (tokens.length === 0) return res.json([]);
-      const where = tokens
-        .map((_, i) => `LOWER(patient) LIKE LOWER($${i + 1})`)
-        .join(" AND ");
-      const params = tokens.map((t) => `%${t}%`);
-      const sql = `SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE ${where} ORDER BY id DESC`;
+      const whereParts = [
+        `LOWER(patient) = LOWER($1)`,
+        `LOWER(patient) LIKE LOWER($2)`,
+      ];
+      const params = [name, `%${name}%`];
+      tokens.forEach((tok, i) => {
+        whereParts.push(`LOWER(patient) LIKE LOWER($${i + 3})`);
+        params.push(`%${tok}%`);
+      });
+      const sql = `SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE ${whereParts.join(
+        " OR "
+      )} ORDER BY id DESC`;
       const result = await pool.query(sql, params);
       return res.json(result.rows);
     }
