@@ -1934,7 +1934,7 @@ app.put("/api/prescription/:id", async (req, res) => {
       description,
     } = req.body || {};
     const result = await pool.query(
-      `UPDATE prescription 
+      `UPDATE prescription
          SET doctor_name = COALESCE($1, doctor_name),
              patient_name = COALESCE($2, patient_name),
              medicine = COALESCE($3, medicine),
