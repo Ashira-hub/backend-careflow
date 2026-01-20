@@ -51,7 +51,7 @@ async function logActivity(userId, type, title, details) {
         type || null,
         title || null,
         details ? JSON.stringify(details) : null,
-      ]
+      ],
     );
   } catch (e) {
     console.warn("activity log failed:", e?.message);
@@ -369,11 +369,70 @@ app.get("/api/activity", async (req, res) => {
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const result = await pool.query(
       "SELECT id, type, title, details, created_at FROM activity_log WHERE user_id = $1 ORDER BY created_at DESC",
-      [userId]
+      [userId],
     );
     res.json(result.rows);
   } catch (err) {
     console.error("GET /api/activity error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+app.post("/api/notifications", async (req, res) => {
+  try {
+    const senderId = getUserId(req);
+    if (!senderId) return res.status(401).json({ message: "Unauthorized" });
+    const body = req.body || {};
+    const title = String(body.title || "Notification").trim();
+    const message = String(body.message || "").trim();
+    if (!title || !message)
+      return res.status(400).json({ message: "Missing title or message" });
+
+    const idCandidate =
+      body.user_id ?? body.userId ?? body.toUserId ?? body.recipientId;
+    const nameCandidate =
+      body.toName ?? body.recipientName ?? body.doctorName ?? body.to;
+
+    let targetUserId = Number(idCandidate);
+    if (!Number.isFinite(targetUserId)) {
+      targetUserId = NaN;
+    }
+    if (!Number.isFinite(targetUserId)) {
+      const name = String(nameCandidate || "").trim();
+      if (!name)
+        return res
+          .status(400)
+          .json({ message: "Missing recipient user id or name" });
+      const ures = await pool.query(
+        "SELECT id FROM users WHERE LOWER(full_name) = LOWER($1) LIMIT 1",
+        [name],
+      );
+      if (ures.rowCount === 0) {
+        const ures2 = await pool.query(
+          "SELECT id FROM users WHERE LOWER(full_name) LIKE LOWER($1) ORDER BY id ASC LIMIT 1",
+          [`%${name}%`],
+        );
+        if (ures2.rowCount === 0)
+          return res.status(404).json({ message: "Recipient not found" });
+        targetUserId = Number(ures2.rows[0].id);
+      } else {
+        targetUserId = Number(ures.rows[0].id);
+      }
+    }
+
+    const ins = await pool.query(
+      "INSERT INTO notifications (user_id, title, message) VALUES ($1, $2, $3) RETURNING id, title, message, read, created_at",
+      [targetUserId, title, message],
+    );
+    try {
+      logActivity(senderId, "notification", `Sent notification: ${title}`, {
+        to_user_id: targetUserId,
+        title,
+      });
+    } catch {}
+    res.status(201).json(ins.rows[0]);
+  } catch (err) {
+    console.error("POST /api/notifications error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -392,13 +451,13 @@ app.get("/api/prescriptions", async (req, res) => {
            FROM prescription
            WHERE LOWER(COALESCE(status,'')) = $1
            ORDER BY created_at DESC`,
-        [status]
+        [status],
       );
     } else {
       result = await pool.query(
         `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_by_user_id, created_at
            FROM prescription
-           ORDER BY created_at DESC`
+           ORDER BY created_at DESC`,
       );
     }
     res.json(result.rows);
@@ -430,14 +489,14 @@ app.post("/api/lab-records", async (req, res) => {
         date || null,
         notes || null,
         userId,
-      ]
+      ],
     );
     const row = insert.rows[0];
     logActivity(
       userId,
       "records",
       `Lab record added: ${row.test_name} • ${row.patient}`,
-      row
+      row,
     );
     res.status(201).json(row);
   } catch (err) {
@@ -456,7 +515,7 @@ app.get("/api/lab-records", async (req, res) => {
          FROM lab_records
          WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
          ORDER BY id DESC`,
-      [userId]
+      [userId],
     );
     res.json(result.rows);
   } catch (err) {
@@ -487,7 +546,7 @@ app.post("/api/lab-tests", async (req, res) => {
         date || null,
         notes || null,
         userId,
-      ]
+      ],
     );
     const row = insert.rows[0];
     // Mirror into lab_records so records reflect tests
@@ -503,7 +562,7 @@ app.post("/api/lab-tests", async (req, res) => {
           row.date || null,
           row.notes || null,
           userId,
-        ]
+        ],
       );
     } catch (e) {
       console.warn("mirror lab_test to lab_records failed:", e?.message);
@@ -513,7 +572,7 @@ app.post("/api/lab-tests", async (req, res) => {
       userId,
       "lab",
       `Lab test added: ${row.test_name} • ${row.patient}`,
-      row
+      row,
     );
     res.status(201).json(row);
   } catch (err) {
@@ -532,7 +591,7 @@ app.get("/api/lab-tests", async (req, res) => {
          FROM lab_tests
          WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
          ORDER BY id DESC`,
-      [userId]
+      [userId],
     );
     res.json(result.rows);
   } catch (err) {
@@ -556,7 +615,7 @@ app.put("/api/lab-tests/:id/status", async (req, res) => {
          SET status = $1
          WHERE id = $2 AND (created_by_user_id = $3 OR created_by_user_id IS NULL)
          RETURNING id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
-      [clean, id, userId]
+      [clean, id, userId],
     );
     if (upd.rowCount === 0)
       return res.status(404).json({ message: "Lab test not found" });
@@ -567,7 +626,7 @@ app.put("/api/lab-tests/:id/status", async (req, res) => {
         `UPDATE lab_records
            SET status = $1
            WHERE test_name = $2 AND patient = $3 AND (date = $4 OR $4 IS NULL) AND (created_by_user_id = $5 OR created_by_user_id IS NULL)`,
-        [clean, row.test_name, row.patient, row.date || null, userId]
+        [clean, row.test_name, row.patient, row.date || null, userId],
       );
     } catch (e) {
       console.warn("mirror status to lab_records failed:", e?.message);
@@ -576,7 +635,7 @@ app.put("/api/lab-tests/:id/status", async (req, res) => {
       userId,
       "lab",
       `Lab test status updated: ${row.test_name} • ${row.patient} -> ${clean}`,
-      { id: row.id, status: clean }
+      { id: row.id, status: clean },
     );
     res.json(row);
   } catch (err) {
@@ -608,13 +667,13 @@ app.post("/api/schedules", async (req, res) => {
         endTime || null,
         note || null,
         userId,
-      ]
+      ],
     );
     logActivity(
       userId,
       "schedule",
       `Schedule created: ${title} • ${date}`,
-      insert.rows[0]
+      insert.rows[0],
     );
     res.status(201).json(insert.rows[0]);
   } catch (err) {
@@ -631,7 +690,7 @@ app.get("/api/schedules", async (req, res) => {
     const result = await pool.query(
       `SELECT id, nurse, title, station, date, start_time AS "startTime", end_time AS "endTime", note, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
          FROM schedules WHERE created_by_user_id = $1 ORDER BY id DESC`,
-      [userId]
+      [userId],
     );
     res.json(result.rows);
   } catch (err) {
@@ -669,7 +728,7 @@ app.put("/api/schedules/:id", async (req, res) => {
         note ?? null,
         id,
         userId,
-      ]
+      ],
     );
     if (result.rowCount === 0)
       return res.status(404).json({ message: "Schedule not found" });
@@ -677,7 +736,7 @@ app.put("/api/schedules/:id", async (req, res) => {
       userId,
       "schedule_update",
       `Schedule updated: ${result.rows[0].title} • ${result.rows[0].date}`,
-      result.rows[0]
+      result.rows[0],
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -694,7 +753,7 @@ app.delete("/api/schedules/:id", async (req, res) => {
     const { id } = req.params;
     const del = await pool.query(
       "DELETE FROM schedules WHERE id = $1 AND created_by_user_id = $2",
-      [id, userId]
+      [id, userId],
     );
     if (del.rowCount === 0)
       return res.status(404).json({ message: "Schedule not found" });
@@ -716,7 +775,7 @@ app.put("/api/prescription/:id/status", async (req, res) => {
     if (!clean) return res.status(400).json({ message: "Missing status" });
     const upd = await pool.query(
       "UPDATE prescription SET status = $1 WHERE id = $2 RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id, status, created_at",
-      [clean, id]
+      [clean, id],
     );
     if (upd.rowCount === 0)
       return res.status(404).json({ message: "Prescription not found" });
@@ -727,7 +786,7 @@ app.put("/api/prescription/:id/status", async (req, res) => {
         const message = `Pharmacy accepted prescription for ${row.patient_name} • ${row.medicine}`;
         await pool.query(
           "INSERT INTO notifications (user_id, title, message) VALUES ($1, $2, $3)",
-          [row.created_by_user_id, title, message]
+          [row.created_by_user_id, title, message],
         );
         logActivity(row.created_by_user_id, "prescription", message, {
           id: row.id,
@@ -753,7 +812,7 @@ app.get("/api/notifications", async (req, res) => {
     const limit = Math.max(1, Math.min(200, Number(req.query?.limit) || 100));
     const result = await pool.query(
       "SELECT id, title, message, read, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2",
-      [userId, limit]
+      [userId, limit],
     );
     res.json(result.rows);
   } catch (err) {
@@ -770,7 +829,7 @@ app.put("/api/notifications/:id/read", async (req, res) => {
     const { id } = req.params;
     const upd = await pool.query(
       "UPDATE notifications SET read = TRUE WHERE id = $1 AND user_id = $2 RETURNING id, title, message, read, created_at",
-      [id, userId]
+      [id, userId],
     );
     if (upd.rowCount === 0)
       return res.status(404).json({ message: "Notification not found" });
@@ -794,7 +853,7 @@ app.post("/api/activity", async (req, res) => {
         type || null,
         title || null,
         details ? JSON.stringify(details) : null,
-      ]
+      ],
     );
     res.status(201).json(ins.rows[0]);
   } catch (err) {
@@ -806,7 +865,7 @@ app.post("/api/activity", async (req, res) => {
 app.get("/users", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, full_name, role, email, active, created_at FROM users ORDER BY id DESC"
+      "SELECT id, full_name, role, email, active, created_at FROM users ORDER BY id DESC",
     );
     res.json(result.rows);
   } catch (err) {
@@ -878,7 +937,7 @@ app.put("/api/users/:id", async (req, res) => {
         typeof allergies === "string" ? allergies : null,
         typeof medical_history === "string" ? medical_history : null,
         id,
-      ]
+      ],
     );
     if (result.rowCount === 0)
       return res.status(404).json({ message: "User not found" });
@@ -915,7 +974,7 @@ app.put("/api/inventory/:id", async (req, res) => {
         category ?? null,
         Number.isFinite(Number(stock)) ? Number(stock) : null,
         id,
-      ]
+      ],
     );
     if (result.rowCount === 0)
       return res.status(404).json({ message: "Inventory item not found" });
@@ -941,13 +1000,13 @@ app.patch("/api/inventory/:id/stock", async (req, res) => {
       result = await pool.query(
         `UPDATE inventory SET stock = GREATEST(0, stock + $1) WHERE id = $2
            RETURNING id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at`,
-        [delta, id]
+        [delta, id],
       );
     } else {
       result = await pool.query(
         `UPDATE inventory SET stock = GREATEST(0, $1) WHERE id = $2
            RETURNING id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at`,
-        [Number(stock), id]
+        [Number(stock), id],
       );
     }
     if (result.rowCount === 0)
@@ -989,7 +1048,7 @@ app.post("/api/inventory", async (req, res) => {
         expirationDate || null,
         Number.isFinite(Number(stock)) ? Number(stock) : 0,
         description || null,
-      ]
+      ],
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1001,7 +1060,7 @@ app.post("/api/inventory", async (req, res) => {
 app.get("/api/inventory", async (_req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at FROM inventory ORDER BY created_at DESC`
+      `SELECT id, category, brand_name AS "brandName", generic_name AS "genericName", dosage_type AS "dosageType", strength, unit, expiration_date AS "expirationDate", stock, description, created_at FROM inventory ORDER BY created_at DESC`,
     );
     res.json(result.rows);
   } catch (err) {
@@ -1020,7 +1079,7 @@ app.get("/api/patient-records/all", async (req, res) => {
          FROM patient_records
          WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
          ORDER BY created_at DESC`,
-      [userId]
+      [userId],
     );
     res.json(result.rows);
   } catch (err) {
@@ -1061,7 +1120,7 @@ app.put("/api/patient-records/latest", async (req, res) => {
         notes ?? null,
         date ?? null,
         time ?? null,
-      ]
+      ],
     );
     if (update.rowCount > 0) return res.json(update.rows[0]);
     // If no existing, insert new
@@ -1076,7 +1135,7 @@ app.put("/api/patient-records/latest", async (req, res) => {
         medicine ?? null,
         dosage ?? null,
         userId,
-      ]
+      ],
     );
     // Log activity for upsert
     logActivity(userId, "records", `Patient record updated: ${patient}`, {
@@ -1113,16 +1172,16 @@ try {
     `);
   // Ensure new columns exist for existing deployments
   await pool.query(
-    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS doctor TEXT;`
+    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS doctor TEXT;`,
   );
   await pool.query(
-    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS medicine TEXT;`
+    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS medicine TEXT;`,
   );
   await pool.query(
-    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS dosage TEXT;`
+    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS dosage TEXT;`,
   );
   await pool.query(
-    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`
+    `ALTER TABLE patient_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;`,
   );
 } catch (e) {
   console.error("ensure patient_records table error:", e);
@@ -1147,7 +1206,7 @@ app.post("/api/patient-records", async (req, res) => {
         medicine ? String(medicine).trim() : null,
         dosage ? String(dosage).trim() : null,
         userId,
-      ]
+      ],
     );
     // Log activity
     logActivity(userId, "records", `Patient record added: ${patient}`, {
@@ -1184,7 +1243,7 @@ app.get("/api/patient-records", async (req, res) => {
            ORDER BY last_ts DESC`;
     const result = await pool.query(sql, [userId]);
     res.json(
-      result.rows.map((r) => ({ patient: r.patient, last_ts: r.last_ts }))
+      result.rows.map((r) => ({ patient: r.patient, last_ts: r.last_ts })),
     );
   } catch (err) {
     console.error("GET /api/patient-records error:", err);
@@ -1198,17 +1257,52 @@ app.post("/api/appointments", async (req, res) => {
   try {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
-    const {
-      patient,
-      date,
-      time,
-      notes,
-      done = false,
-      createdByName,
-    } = req.body || {};
+    const body = req.body || {};
+    const patient = body.patient;
+    const date = body.date;
+    const time = body.time;
+    const notes = body.notes;
+    const done = body.done ?? false;
+    const createdByName =
+      body.createdByName ||
+      body.created_by_name ||
+      body.doctorName ||
+      body.doctor_name;
     if (!patient || !date || !time) {
       return res.status(400).json({ message: "Missing required fields" });
     }
+
+    let role = null;
+    try {
+      const ures = await pool.query("SELECT role FROM users WHERE id = $1", [
+        userId,
+      ]);
+      role =
+        ures.rowCount > 0 && ures.rows[0]?.role
+          ? String(ures.rows[0].role).toLowerCase()
+          : null;
+    } catch {}
+
+    let assignedDoctorUserId = userId;
+    if (role === "patient") {
+      const docName = String(createdByName || "").trim();
+      if (!docName)
+        return res.status(400).json({ message: "Missing doctor name" });
+      let dres = await pool.query(
+        "SELECT id FROM users WHERE role ILIKE 'doctor' AND LOWER(full_name) = LOWER($1) LIMIT 1",
+        [docName],
+      );
+      if (dres.rowCount === 0) {
+        dres = await pool.query(
+          "SELECT id FROM users WHERE role ILIKE 'doctor' AND LOWER(full_name) LIKE LOWER($1) ORDER BY id ASC LIMIT 1",
+          [`%${docName}%`],
+        );
+      }
+      if (dres.rowCount === 0)
+        return res.status(404).json({ message: "Doctor not found" });
+      assignedDoctorUserId = Number(dres.rows[0].id);
+    }
+
     const insert = await pool.query(
       "INSERT INTO appointments (patient, date, time, notes, done, created_by_name, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, patient, date, time, notes, done, created_by_name, created_at",
       [
@@ -1218,9 +1312,30 @@ app.post("/api/appointments", async (req, res) => {
         notes || null,
         Boolean(done),
         createdByName ? String(createdByName).trim() : null,
-        userId,
-      ]
+        assignedDoctorUserId,
+      ],
     );
+
+    if (role === "patient") {
+      try {
+        const title = "Appointment Request";
+        const msg = `New appointment request from ${String(patient).trim()} • ${String(
+          date,
+        ).trim()} ${String(time).trim()}${notes ? ` • ${String(notes).trim()}` : ""}`;
+        await pool.query(
+          "INSERT INTO notifications (user_id, title, message) VALUES ($1, $2, $3)",
+          [assignedDoctorUserId, title, msg],
+        );
+        logActivity(assignedDoctorUserId, "appointment", title, {
+          appointment_id: insert.rows[0]?.id,
+          patient,
+          date,
+          time,
+        });
+      } catch (e) {
+        console.warn("notify doctor failed:", e?.message);
+      }
+    }
     // Also log into patient_records for unified reporting
     try {
       await pool.query(
@@ -1233,8 +1348,8 @@ app.post("/api/appointments", async (req, res) => {
           createdByName ? String(createdByName).trim() : null,
           null,
           null,
-          userId,
-        ]
+          assignedDoctorUserId,
+        ],
       );
     } catch (e) {
       console.warn("mirror appointment to patient_records failed:", e?.message);
@@ -1250,7 +1365,7 @@ app.post("/api/appointments", async (req, res) => {
           String(time).trim(),
           status,
           insert.rows[0].id,
-        ]
+        ],
       );
     } catch {}
     // Log activity
@@ -1265,7 +1380,7 @@ app.post("/api/appointments", async (req, res) => {
         time,
         notes,
         done,
-      }
+      },
     );
     res.status(201).json(insert.rows[0]);
   } catch (err) {
@@ -1285,7 +1400,7 @@ app.get("/api/appointments", async (req, res) => {
     try {
       const ures = await pool.query(
         "SELECT role, full_name FROM users WHERE id = $1",
-        [userId]
+        [userId],
       );
       if (ures.rowCount > 0) {
         role =
@@ -1311,7 +1426,7 @@ app.get("/api/appointments", async (req, res) => {
         params.push(`%${tok}%`);
       });
       const sql = `SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE ${whereParts.join(
-        " OR "
+        " OR ",
       )} ORDER BY id DESC`;
       const result = await pool.query(sql, params);
       return res.json(result.rows);
@@ -1320,7 +1435,7 @@ app.get("/api/appointments", async (req, res) => {
     // Default: list appointments created by this user (doctor/other roles)
     const result = await pool.query(
       "SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE created_by_user_id = $1 ORDER BY id DESC",
-      [userId]
+      [userId],
     );
     return res.json(result.rows);
   } catch (err) {
@@ -1344,7 +1459,7 @@ app.put("/api/appointments/:id", async (req, res) => {
         typeof done === "boolean" ? done : null,
         createdByName ?? null,
         id,
-      ]
+      ],
     );
     if (result.rowCount === 0)
       return res.status(404).json({ message: "Appointment not found" });
@@ -1354,7 +1469,7 @@ app.put("/api/appointments/:id", async (req, res) => {
       const status = updated.done ? "done" : "pending";
       await pool.query(
         "UPDATE appointment SET full_name = COALESCE($1, full_name), date = COALESCE($2, date), time = COALESCE($3, time), status = $4 WHERE appointment_id = $5",
-        [updated.patient, updated.date, updated.time, status, updated.id]
+        [updated.patient, updated.date, updated.time, status, updated.id],
       );
     } catch {}
     // Log activity
@@ -1365,7 +1480,7 @@ app.put("/api/appointments/:id", async (req, res) => {
           userId,
           "appointment_update",
           `Appointment updated: ${updated.patient} • ${updated.date} ${updated.time}`,
-          updated
+          updated,
         );
     } catch {}
     res.json(updated);
@@ -1402,7 +1517,7 @@ app.delete("/api/appointments/:id", async (req, res) => {
 app.get("/api/users", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, full_name AS name, role, email, active FROM users ORDER BY id DESC"
+      "SELECT id, full_name AS name, role, email, active FROM users ORDER BY id DESC",
     );
     res.json(result.rows);
   } catch (err) {
@@ -1418,13 +1533,13 @@ app.get("/api/users/:id", async (req, res) => {
     // First try to get from profile table
     let result = await pool.query(
       "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri FROM profile WHERE id = $1",
-      [id]
+      [id],
     );
     // If not found in profile table, check users table
     if (result.rowCount === 0) {
       result = await pool.query(
         "SELECT id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri FROM users WHERE id = $1",
-        [id]
+        [id],
       );
     }
     if (result.rowCount === 0)
@@ -1442,7 +1557,7 @@ app.get("/api/profile/:id", async (req, res) => {
     const { id } = req.params;
     const result = await pool.query(
       "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri, created_at, last_edited FROM profile WHERE id = $1",
-      [id]
+      [id],
     );
     if (result.rowCount === 0)
       return res.status(404).json({ message: "Profile not found" });
@@ -1492,7 +1607,7 @@ app.put("/api/profile/:id", async (req, res) => {
         cleanGender,
         avatar_uri || null,
         id,
-      ]
+      ],
     );
 
     if (result.rowCount === 0)
@@ -1551,7 +1666,7 @@ app.post("/api/users/register", async (req, res) => {
     // Check if user already exists
     const existingUser = await client.query(
       "SELECT id FROM users WHERE LOWER(email) = LOWER($1)",
-      [email]
+      [email],
     );
 
     if (existingUser.rows.length > 0) {
@@ -1583,7 +1698,7 @@ app.post("/api/users/register", async (req, res) => {
         normalizedRole,
         true,
         new Date().toISOString(),
-      ]
+      ],
     );
 
     const newUser = result.rows[0];
@@ -1668,7 +1783,7 @@ app.put("/api/users/:id", async (req, res) => {
           gender ?? null,
           avatar_uri ?? null,
           id,
-        ]
+        ],
       );
     } else {
       result = await pool.query(
@@ -1684,7 +1799,7 @@ app.put("/api/users/:id", async (req, res) => {
           gender ?? null,
           avatar_uri ?? null,
           id,
-        ]
+        ],
       );
     }
     if (result.rowCount === 0)
@@ -1723,7 +1838,7 @@ app.put("/api/users/:id", async (req, res) => {
           cleanBirthdate,
           cleanGender,
           avatar_uri ?? null,
-        ]
+        ],
       );
     } catch (profileErr) {
       console.warn("Profile sync error:", profileErr);
@@ -1747,7 +1862,7 @@ app.patch("/api/users/:id/active", async (req, res) => {
     }
     const result = await pool.query(
       "UPDATE users SET active = $1 WHERE id = $2 RETURNING id, full_name AS name, role, email, active",
-      [active, id]
+      [active, id],
     );
     if (result.rowCount === 0)
       return res.status(404).json({ message: "User not found" });
@@ -1798,7 +1913,7 @@ app.post("/api/register", async (req, res) => {
 
     const insert = await pool.query(
       "INSERT INTO users (full_name, role, email, password_hash) VALUES ($1, $2, $3, $4) RETURNING id, full_name, role, email, created_at",
-      [fullName, role, normalizedEmail, password_hash]
+      [fullName, role, normalizedEmail, password_hash],
     );
 
     console.log("✅ User registered:", insert.rows[0]);
@@ -1879,7 +1994,7 @@ app.post("/api/prescription", async (req, res) => {
         dosage_strength || null,
         description || null,
         userId,
-      ]
+      ],
     );
     // Log activity
     logActivity(
@@ -1893,7 +2008,7 @@ app.post("/api/prescription", async (req, res) => {
         medicine,
         quantity,
         dosage_strength,
-      }
+      },
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -1912,7 +2027,7 @@ app.get("/api/prescription/:id", async (req, res) => {
     }
     const result = await pool.query(
       "SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_at FROM prescription WHERE created_by_user_id = $1 ORDER BY created_at DESC",
-      [userId]
+      [userId],
     );
     res.json(result.rows);
   } catch (err) {
@@ -1951,7 +2066,7 @@ app.put("/api/prescription/:id", async (req, res) => {
         dosage_strength ?? null,
         description ?? null,
         id,
-      ]
+      ],
     );
     if (result.rowCount === 0)
       return res.status(404).json({ message: "Prescription not found" });
