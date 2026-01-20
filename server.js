@@ -1449,6 +1449,34 @@ app.put("/api/appointments/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { patient, date, time, notes, done, createdByName } = req.body || {};
+
+    const actorUserId = getUserId(req);
+    if (!actorUserId) return res.status(401).json({ message: "Unauthorized" });
+
+    let actorRole = null;
+    let actorName = null;
+    try {
+      const ures = await pool.query(
+        "SELECT role, full_name FROM users WHERE id = $1",
+        [actorUserId],
+      );
+      if (ures.rowCount > 0) {
+        actorRole = ures.rows[0]?.role
+          ? String(ures.rows[0].role).toLowerCase()
+          : null;
+        actorName = ures.rows[0]?.full_name || null;
+      }
+    } catch {}
+
+    let before = null;
+    try {
+      const bres = await pool.query(
+        "SELECT id, patient, date, time, done, created_by_name, created_by_user_id FROM appointments WHERE id = $1",
+        [id],
+      );
+      before = bres.rowCount > 0 ? bres.rows[0] : null;
+    } catch {}
+
     const result = await pool.query(
       "UPDATE appointments SET patient = COALESCE($1, patient), date = COALESCE($2, date), time = COALESCE($3, time), notes = COALESCE($4, notes), done = COALESCE($5, done), created_by_name = COALESCE($6, created_by_name) WHERE id = $7 RETURNING id, patient, date, time, notes, done, created_by_name, created_at",
       [
@@ -1464,20 +1492,102 @@ app.put("/api/appointments/:id", async (req, res) => {
     if (result.rowCount === 0)
       return res.status(404).json({ message: "Appointment not found" });
     const updated = result.rows[0];
+
+    const oldDate = before?.date ? String(before.date) : null;
+    const oldTime = before?.time ? String(before.time) : null;
+    const newDate = updated?.date ? String(updated.date) : null;
+    const newTime = updated?.time ? String(updated.time) : null;
+    const dateChanged =
+      oldDate != null && newDate != null && String(oldDate) !== String(newDate);
+    const timeChanged =
+      oldTime != null && newTime != null && String(oldTime) !== String(newTime);
+    const isReschedule = dateChanged || timeChanged;
+
+    let mirrorPrevStatus = null;
+    try {
+      const sres = await pool.query(
+        "SELECT status FROM appointment WHERE appointment_id = $1 LIMIT 1",
+        [updated.id],
+      );
+      mirrorPrevStatus =
+        sres.rowCount > 0 && sres.rows[0]?.status
+          ? String(sres.rows[0].status).toLowerCase()
+          : null;
+    } catch {}
+
+    const shouldAccept =
+      actorRole === "doctor" &&
+      !updated.done &&
+      (mirrorPrevStatus === "pending" || mirrorPrevStatus == null);
+
     // Mirror to simplified table by appointment_id
     try {
-      const status = updated.done ? "done" : "pending";
+      const status = updated.done
+        ? "done"
+        : shouldAccept
+          ? "accepted"
+          : "pending";
       await pool.query(
         "UPDATE appointment SET full_name = COALESCE($1, full_name), date = COALESCE($2, date), time = COALESCE($3, time), status = $4 WHERE appointment_id = $5",
         [updated.patient, updated.date, updated.time, status, updated.id],
       );
     } catch {}
+
+    // Notify patient on accept / reschedule (best-effort)
+    try {
+      const patientName = String(updated.patient || "").trim();
+      if (patientName) {
+        let patientUserId = null;
+        try {
+          let pres = await pool.query(
+            "SELECT id FROM users WHERE role ILIKE 'patient' AND LOWER(full_name) = LOWER($1) LIMIT 1",
+            [patientName],
+          );
+          if (pres.rowCount === 0) {
+            pres = await pool.query(
+              "SELECT id FROM users WHERE role ILIKE 'patient' AND LOWER(full_name) LIKE LOWER($1) ORDER BY id ASC LIMIT 1",
+              [`%${patientName}%`],
+            );
+          }
+          patientUserId = pres.rowCount > 0 ? Number(pres.rows[0].id) : null;
+        } catch {}
+
+        const doctorName = String(
+          actorName ||
+            updated.created_by_name ||
+            before?.created_by_name ||
+            "Doctor",
+        ).trim();
+
+        if (patientUserId) {
+          if (shouldAccept) {
+            const title = "Appointment Accepted";
+            const message = `Dr. ${doctorName} accepted your appointment request for ${newDate || ""} ${newTime || ""}.`;
+            try {
+              await pool.query(
+                "INSERT INTO notifications (user_id, title, message) VALUES ($1, $2, $3)",
+                [patientUserId, title, message],
+              );
+            } catch {}
+          }
+          if (isReschedule && actorRole === "doctor") {
+            const title = "Appointment Rescheduled";
+            const message = `Your appointment with Dr. ${doctorName} was rescheduled from ${oldDate || ""} ${oldTime || ""} to ${newDate || ""} ${newTime || ""}.`;
+            try {
+              await pool.query(
+                "INSERT INTO notifications (user_id, title, message) VALUES ($1, $2, $3)",
+                [patientUserId, title, message],
+              );
+            } catch {}
+          }
+        }
+      }
+    } catch {}
     // Log activity
     try {
-      const userId = getUserId(req);
-      if (userId)
+      if (actorUserId)
         logActivity(
-          userId,
+          actorUserId,
           "appointment_update",
           `Appointment updated: ${updated.patient} • ${updated.date} ${updated.time}`,
           updated,
