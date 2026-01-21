@@ -1556,7 +1556,14 @@ app.put("/api/appointments/:id", async (req, res) => {
             ? "accepted"
             : "pending";
       await pool.query(
-        "UPDATE appointment SET full_name = COALESCE($1, full_name), date = COALESCE($2, date), time = COALESCE($3, time), status = $4 WHERE appointment_id = $5",
+        `INSERT INTO appointment (full_name, date, time, status, appointment_id)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (appointment_id)
+         DO UPDATE SET
+           full_name = COALESCE(EXCLUDED.full_name, appointment.full_name),
+           date = COALESCE(EXCLUDED.date, appointment.date),
+           time = COALESCE(EXCLUDED.time, appointment.time),
+           status = EXCLUDED.status`,
         [updated.patient, updated.date, updated.time, status, updated.id],
       );
     } catch {}
