@@ -1263,6 +1263,11 @@ app.post("/api/appointments", async (req, res) => {
     const time = body.time;
     const notes = body.notes;
     const done = body.done ?? false;
+    const doctorUserIdCandidate =
+      body.doctor_user_id ??
+      body.doctorUserId ??
+      body.doctor_id ??
+      body.doctorId;
     const createdByName =
       body.createdByName ||
       body.created_by_name ||
@@ -1285,22 +1290,36 @@ app.post("/api/appointments", async (req, res) => {
 
     let assignedDoctorUserId = userId;
     if (role === "patient") {
-      const docName = String(createdByName || "").trim();
-      if (!docName)
-        return res.status(400).json({ message: "Missing doctor name" });
-      let dres = await pool.query(
-        "SELECT id FROM users WHERE role ILIKE 'doctor' AND LOWER(full_name) = LOWER($1) LIMIT 1",
-        [docName],
-      );
-      if (dres.rowCount === 0) {
-        dres = await pool.query(
-          "SELECT id FROM users WHERE role ILIKE 'doctor' AND LOWER(full_name) LIKE LOWER($1) ORDER BY id ASC LIMIT 1",
-          [`%${docName}%`],
+      let did = Number(doctorUserIdCandidate);
+      if (!Number.isFinite(did)) did = NaN;
+
+      if (Number.isFinite(did)) {
+        const dchk = await pool.query(
+          "SELECT id FROM users WHERE id = $1 AND role ILIKE 'doctor' LIMIT 1",
+          [did],
         );
+        if (dchk.rowCount === 0) {
+          return res.status(404).json({ message: "Doctor not found" });
+        }
+        assignedDoctorUserId = Number(dchk.rows[0].id);
+      } else {
+        const docName = String(createdByName || "").trim();
+        if (!docName)
+          return res.status(400).json({ message: "Missing doctor name" });
+        let dres = await pool.query(
+          "SELECT id FROM users WHERE role ILIKE 'doctor' AND LOWER(full_name) = LOWER($1) LIMIT 1",
+          [docName],
+        );
+        if (dres.rowCount === 0) {
+          dres = await pool.query(
+            "SELECT id FROM users WHERE role ILIKE 'doctor' AND LOWER(full_name) LIKE LOWER($1) ORDER BY id ASC LIMIT 1",
+            [`%${docName}%`],
+          );
+        }
+        if (dres.rowCount === 0)
+          return res.status(404).json({ message: "Doctor not found" });
+        assignedDoctorUserId = Number(dres.rows[0].id);
       }
-      if (dres.rowCount === 0)
-        return res.status(404).json({ message: "Doctor not found" });
-      assignedDoctorUserId = Number(dres.rows[0].id);
     }
 
     const insert = await pool.query(
