@@ -1444,9 +1444,16 @@ app.get("/api/appointments", async (req, res) => {
         whereParts.push(`LOWER(patient) LIKE LOWER($${i + 3})`);
         params.push(`%${tok}%`);
       });
-      const sql = `SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE ${whereParts.join(
-        " OR ",
-      )} ORDER BY id DESC`;
+      const sql = `SELECT a.id, a.patient, a.date, a.time, a.notes, a.done, a.created_by_name, a.created_at,
+        CASE
+          WHEN a.done THEN 'done'
+          WHEN LOWER(COALESCE(m.status, '')) = 'accepted' THEN 'accepted'
+          ELSE 'pending'
+        END AS status
+      FROM appointments a
+      LEFT JOIN appointment m ON m.appointment_id = a.id
+      WHERE ${whereParts.join(" OR ")}
+      ORDER BY a.id DESC`;
       const result = await pool.query(sql, params);
       return res.json(result.rows);
     }
@@ -1545,7 +1552,9 @@ app.put("/api/appointments/:id", async (req, res) => {
         ? "done"
         : shouldAccept
           ? "accepted"
-          : "pending";
+          : mirrorPrevStatus === "accepted"
+            ? "accepted"
+            : "pending";
       await pool.query(
         "UPDATE appointment SET full_name = COALESCE($1, full_name), date = COALESCE($2, date), time = COALESCE($3, time), status = $4 WHERE appointment_id = $5",
         [updated.patient, updated.date, updated.time, status, updated.id],
@@ -2125,6 +2134,36 @@ app.post("/api/prescription", async (req, res) => {
         userId,
       ],
     );
+
+    // Notify patient (best-effort)
+    try {
+      const patientName = String(patient_name || "").trim();
+      let patientUserId = null;
+      if (patientName) {
+        let pres = await pool.query(
+          "SELECT id FROM users WHERE role ILIKE 'patient' AND LOWER(full_name) = LOWER($1) LIMIT 1",
+          [patientName],
+        );
+        if (pres.rowCount === 0) {
+          pres = await pool.query(
+            "SELECT id FROM users WHERE role ILIKE 'patient' AND LOWER(full_name) LIKE LOWER($1) ORDER BY id ASC LIMIT 1",
+            [`%${patientName}%`],
+          );
+        }
+        patientUserId = pres.rowCount > 0 ? Number(pres.rows[0].id) : null;
+      }
+      if (patientUserId) {
+        const title = "New Prescription";
+        const msg = `Dr. ${String(doctor_name).trim()} sent you a prescription • ${String(
+          medicine,
+        ).trim()}`;
+        await pool.query(
+          "INSERT INTO notifications (user_id, title, message) VALUES ($1, $2, $3)",
+          [patientUserId, title, msg],
+        );
+      }
+    } catch {}
+
     // Log activity
     logActivity(
       userId,
