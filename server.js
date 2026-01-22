@@ -2214,6 +2214,8 @@ app.get("/api/prescription/:id", async (req, res) => {
 // Update prescription
 app.put("/api/prescription/:id", async (req, res) => {
   try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
     const { id } = req.params;
     const {
       patient_name,
@@ -2222,7 +2224,28 @@ app.put("/api/prescription/:id", async (req, res) => {
       quantity,
       dosage_strength,
       description,
+      status,
     } = req.body || {};
+
+    let nextStatus = status ?? null;
+    if (nextStatus != null) {
+      const s = String(nextStatus).trim().toLowerCase();
+      if (!s) {
+        nextStatus = null;
+      } else if (
+        s === "pending" ||
+        s === "completed" ||
+        s === "dispensed" ||
+        s === "cancelled" ||
+        s === "rejected" ||
+        s === "accepted"
+      ) {
+        nextStatus =
+          s === "dispensed" ? "completed" : s === "accepted" ? "completed" : s;
+      } else {
+        return res.status(400).json({ message: "Invalid status" });
+      }
+    }
     const result = await pool.query(
       `UPDATE prescription
          SET doctor_name = COALESCE($1, doctor_name),
@@ -2230,9 +2253,10 @@ app.put("/api/prescription/:id", async (req, res) => {
              medicine = COALESCE($3, medicine),
              quantity = COALESCE($4, quantity),
              dosage_strength = COALESCE($5, dosage_strength),
-             description = COALESCE($6, description)
-         WHERE id = $7
-         RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at`,
+             description = COALESCE($6, description),
+             status = COALESCE($7, status)
+         WHERE id = $8
+         RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_at`,
       [
         doctor_name ?? null,
         patient_name ?? null,
@@ -2240,6 +2264,7 @@ app.put("/api/prescription/:id", async (req, res) => {
         quantity ?? null,
         dosage_strength ?? null,
         description ?? null,
+        nextStatus,
         id,
       ],
     );
