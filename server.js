@@ -73,6 +73,7 @@ async function ensureSchema() {
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL,
+        specialty TEXT,
         phone TEXT,
         address TEXT,
         birthdate TEXT,
@@ -120,6 +121,7 @@ async function ensureSchema() {
         patient TEXT NOT NULL,
         date TEXT NOT NULL,
         time TEXT NOT NULL,
+        specialty TEXT,
         notes TEXT,
         done BOOLEAN DEFAULT FALSE,
         created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -254,6 +256,11 @@ async function ensureSchema() {
                       WHERE table_name = 'appointments' AND column_name = 'created_by_name') THEN
           ALTER TABLE appointments ADD COLUMN created_by_name TEXT;
         END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                      WHERE table_name = 'appointments' AND column_name = 'specialty') THEN
+          ALTER TABLE appointments ADD COLUMN specialty TEXT;
+        END IF;
         
         -- Add missing columns to lab_tests
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
@@ -296,6 +303,11 @@ async function ensureSchema() {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                        WHERE table_name = 'users' AND column_name = 'medical_history') THEN
           ALTER TABLE users ADD COLUMN medical_history TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'users' AND column_name = 'specialty') THEN
+          ALTER TABLE users ADD COLUMN specialty TEXT;
         END IF;
       END
       $$`);
@@ -893,6 +905,7 @@ app.put("/api/users/:id", async (req, res) => {
       birthdate,
       gender,
       avatar_uri,
+      specialty,
       blood_type,
       height,
       weight,
@@ -905,6 +918,11 @@ app.put("/api/users/:id", async (req, res) => {
       (typeof fullName === "string" && fullName.trim()) ||
       (typeof name === "string" && name.trim()) ||
       null;
+
+    const cleanSpecialty =
+      typeof specialty === "string" && specialty.trim()
+        ? specialty.trim()
+        : null;
 
     const result = await pool.query(
       `UPDATE users SET
@@ -920,9 +938,10 @@ app.put("/api/users/:id", async (req, res) => {
          weight = COALESCE($10, weight),
          allergies = COALESCE($11, allergies),
          medical_history = COALESCE($12, medical_history),
+         specialty = COALESCE($13, specialty),
          updated_at = NOW()
-       WHERE id = $13
-       RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, role, active, created_at, updated_at`,
+       WHERE id = $14
+       RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, specialty, role, active, created_at, updated_at`,
       [
         desiredName,
         typeof email === "string" ? email : null,
@@ -936,6 +955,7 @@ app.put("/api/users/:id", async (req, res) => {
         typeof weight === "string" ? weight : null,
         typeof allergies === "string" ? allergies : null,
         typeof medical_history === "string" ? medical_history : null,
+        cleanSpecialty,
         id,
       ],
     );
@@ -1262,6 +1282,8 @@ app.post("/api/appointments", async (req, res) => {
     const date = body.date;
     const time = body.time;
     const notes = body.notes;
+    const specialtyCandidate =
+      body.specialty || body.doctor_specialty || body.doctorSpecialty;
     const done = body.done ?? false;
     const doctorUserIdCandidate =
       body.doctor_user_id ??
@@ -1322,12 +1344,28 @@ app.post("/api/appointments", async (req, res) => {
       }
     }
 
+    let finalSpecialty =
+      typeof specialtyCandidate === "string" && specialtyCandidate.trim()
+        ? specialtyCandidate.trim()
+        : null;
+    if (!finalSpecialty) {
+      try {
+        const sres = await pool.query(
+          "SELECT specialty FROM users WHERE id = $1 LIMIT 1",
+          [assignedDoctorUserId],
+        );
+        if (sres.rowCount > 0 && sres.rows[0]?.specialty)
+          finalSpecialty = String(sres.rows[0].specialty).trim() || null;
+      } catch {}
+    }
+
     const insert = await pool.query(
-      "INSERT INTO appointments (patient, date, time, notes, done, created_by_name, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, patient, date, time, notes, done, created_by_name, created_at",
+      "INSERT INTO appointments (patient, date, time, specialty, notes, done, created_by_name, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, specialty, notes, done, created_by_name, created_at",
       [
         String(patient).trim(),
         String(date).trim(),
         String(time).trim(),
+        finalSpecialty,
         notes || null,
         Boolean(done),
         createdByName ? String(createdByName).trim() : null,
@@ -1397,6 +1435,7 @@ app.post("/api/appointments", async (req, res) => {
         patient,
         date,
         time,
+        specialty: insert.rows[0]?.specialty,
         notes,
         done,
       },
@@ -1445,6 +1484,7 @@ app.get("/api/appointments", async (req, res) => {
         params.push(`%${tok}%`);
       });
       const sql = `SELECT a.id, a.patient, a.date, a.time, a.notes, a.done, a.created_by_name, a.created_at,
+        a.specialty,
         CASE
           WHEN a.done THEN 'done'
           WHEN LOWER(COALESCE(m.status, '')) = 'accepted' THEN 'accepted'
@@ -1460,7 +1500,7 @@ app.get("/api/appointments", async (req, res) => {
 
     // Default: list appointments created by this user (doctor/other roles)
     const result = await pool.query(
-      "SELECT id, patient, date, time, notes, done, created_by_name, created_at FROM appointments WHERE created_by_user_id = $1 ORDER BY id DESC",
+      "SELECT id, patient, date, time, specialty, notes, done, created_by_name, created_at FROM appointments WHERE created_by_user_id = $1 ORDER BY id DESC",
       [userId],
     );
     return res.json(result.rows);
@@ -1474,7 +1514,8 @@ app.get("/api/appointments", async (req, res) => {
 app.put("/api/appointments/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { patient, date, time, notes, done, createdByName } = req.body || {};
+    const { patient, date, time, notes, done, createdByName, specialty } =
+      req.body || {};
 
     const actorUserId = getUserId(req);
     if (!actorUserId) return res.status(401).json({ message: "Unauthorized" });
@@ -1497,18 +1538,19 @@ app.put("/api/appointments/:id", async (req, res) => {
     let before = null;
     try {
       const bres = await pool.query(
-        "SELECT id, patient, date, time, done, created_by_name, created_by_user_id FROM appointments WHERE id = $1",
+        "SELECT id, patient, date, time, specialty, done, created_by_name, created_by_user_id FROM appointments WHERE id = $1",
         [id],
       );
       before = bres.rowCount > 0 ? bres.rows[0] : null;
     } catch {}
 
     const result = await pool.query(
-      "UPDATE appointments SET patient = COALESCE($1, patient), date = COALESCE($2, date), time = COALESCE($3, time), notes = COALESCE($4, notes), done = COALESCE($5, done), created_by_name = COALESCE($6, created_by_name) WHERE id = $7 RETURNING id, patient, date, time, notes, done, created_by_name, created_at",
+      "UPDATE appointments SET patient = COALESCE($1, patient), date = COALESCE($2, date), time = COALESCE($3, time), specialty = COALESCE($4, specialty), notes = COALESCE($5, notes), done = COALESCE($6, done), created_by_name = COALESCE($7, created_by_name) WHERE id = $8 RETURNING id, patient, date, time, specialty, notes, done, created_by_name, created_at",
       [
         patient ?? null,
         date ?? null,
         time ?? null,
+        specialty ?? null,
         notes ?? null,
         typeof done === "boolean" ? done : null,
         createdByName ?? null,
@@ -1677,13 +1719,13 @@ app.get("/api/users/:id", async (req, res) => {
     const { id } = req.params;
     // First try to get from profile table
     let result = await pool.query(
-      "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri FROM profile WHERE id = $1",
+      "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri, NULL::text AS specialty FROM profile WHERE id = $1",
       [id],
     );
     // If not found in profile table, check users table
     if (result.rowCount === 0) {
       result = await pool.query(
-        "SELECT id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri FROM users WHERE id = $1",
+        "SELECT id, full_name AS name, role, email, active, phone, address, birthdate, gender, avatar_uri, specialty FROM users WHERE id = $1",
         [id],
       );
     }
@@ -1701,7 +1743,7 @@ app.get("/api/profile/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri, created_at, last_edited FROM profile WHERE id = $1",
+      "SELECT p.id, p.fullname AS name, p.role, p.email, p.phone, p.address, p.birthdate, p.gender, p.avatar_uri, p.created_at, p.last_edited, u.specialty AS specialty FROM profile p LEFT JOIN users u ON u.id = p.id WHERE p.id = $1",
       [id],
     );
     if (result.rowCount === 0)
@@ -1717,8 +1759,17 @@ app.get("/api/profile/:id", async (req, res) => {
 app.put("/api/profile/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, role, phone, address, birthdate, gender, avatar_uri } =
-      req.body || {};
+    const {
+      name,
+      email,
+      role,
+      phone,
+      address,
+      birthdate,
+      gender,
+      avatar_uri,
+      specialty,
+    } = req.body || {};
     // Convert empty strings to null to avoid PostgreSQL errors
     const cleanPhone = phone && phone.trim() ? phone.trim() : null;
     const cleanAddress = address && address.trim() ? address.trim() : null;
@@ -1728,6 +1779,10 @@ app.put("/api/profile/:id", async (req, res) => {
     const cleanName = name && name.trim() ? name.trim() : null;
     const cleanEmail = email && email.trim() ? email.trim() : null;
     const cleanRole = role && role.trim() ? role.trim() : null;
+    const cleanSpecialty =
+      typeof specialty === "string" && specialty.trim()
+        ? specialty.trim()
+        : null;
 
     const result = await pool.query(
       `UPDATE profile 
@@ -1755,9 +1810,30 @@ app.put("/api/profile/:id", async (req, res) => {
       ],
     );
 
+    // Specialty is stored on users table (not profile); update best-effort
+    try {
+      if (cleanSpecialty !== null) {
+        await pool.query(
+          "UPDATE users SET specialty = COALESCE($1, specialty), updated_at = NOW() WHERE id = $2",
+          [cleanSpecialty, id],
+        );
+      }
+    } catch {}
+
     if (result.rowCount === 0)
       return res.status(404).json({ message: "Profile not found" });
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    if (cleanSpecialty !== null) row.specialty = cleanSpecialty;
+    else {
+      try {
+        const ures = await pool.query(
+          "SELECT specialty FROM users WHERE id = $1 LIMIT 1",
+          [id],
+        );
+        if (ures.rowCount > 0) row.specialty = ures.rows[0]?.specialty || null;
+      } catch {}
+    }
+    res.json(row);
   } catch (err) {
     console.error("PUT /api/profile/:id error:", err);
     res.status(500).json({ message: "Server error updating profile" });
