@@ -924,47 +924,98 @@ app.put("/api/users/:id", async (req, res) => {
         ? specialty.trim()
         : null;
 
-    const result = await pool.query(
-      `UPDATE users SET
-         full_name = COALESCE($1, full_name),
-         email = COALESCE($2, email),
-         phone = COALESCE($3, phone),
-         address = COALESCE($4, address),
-         birthdate = COALESCE($5, birthdate),
-         gender = COALESCE($6, gender),
-         avatar_uri = COALESCE($7, avatar_uri),
-         blood_type = COALESCE($8, blood_type),
-         height = COALESCE($9, height),
-         weight = COALESCE($10, weight),
-         allergies = COALESCE($11, allergies),
-         medical_history = COALESCE($12, medical_history),
-         specialty = COALESCE($13, specialty),
-         updated_at = NOW()
-       WHERE id = $14
-       RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, specialty, role, active, created_at, updated_at`,
-      [
-        desiredName,
-        typeof email === "string" ? email : null,
-        typeof phone === "string" ? phone : null,
-        typeof address === "string" ? address : null,
-        typeof birthdate === "string" ? birthdate : null,
-        typeof gender === "string" ? gender : null,
-        typeof avatar_uri === "string" ? avatar_uri : null,
-        typeof blood_type === "string" ? blood_type : null,
-        typeof height === "string" ? height : null,
-        typeof weight === "string" ? weight : null,
-        typeof allergies === "string" ? allergies : null,
-        typeof medical_history === "string" ? medical_history : null,
-        cleanSpecialty,
-        id,
-      ],
-    );
+    let result;
+    try {
+      result = await pool.query(
+        `UPDATE users SET
+           full_name = COALESCE($1, full_name),
+           email = COALESCE($2, email),
+           phone = COALESCE($3, phone),
+           address = COALESCE($4, address),
+           birthdate = COALESCE($5, birthdate),
+           gender = COALESCE($6, gender),
+           avatar_uri = COALESCE($7, avatar_uri),
+           blood_type = COALESCE($8, blood_type),
+           height = COALESCE($9, height),
+           weight = COALESCE($10, weight),
+           allergies = COALESCE($11, allergies),
+           medical_history = COALESCE($12, medical_history),
+           specialty = COALESCE($13, specialty),
+           updated_at = NOW()
+         WHERE id = $14
+         RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, specialty, role, active, created_at, updated_at`,
+        [
+          desiredName,
+          typeof email === "string" ? email : null,
+          typeof phone === "string" ? phone : null,
+          typeof address === "string" ? address : null,
+          typeof birthdate === "string" ? birthdate : null,
+          typeof gender === "string" ? gender : null,
+          typeof avatar_uri === "string" ? avatar_uri : null,
+          typeof blood_type === "string" ? blood_type : null,
+          typeof height === "string" ? height : null,
+          typeof weight === "string" ? weight : null,
+          typeof allergies === "string" ? allergies : null,
+          typeof medical_history === "string" ? medical_history : null,
+          cleanSpecialty,
+          id,
+        ],
+      );
+    } catch (e) {
+      // If deployed DB hasn't been migrated yet, avoid crashing on missing column
+      if (
+        (e && e.code === "42703") ||
+        /column\s+"specialty"/i.test(String(e?.message || ""))
+      ) {
+        result = await pool.query(
+          `UPDATE users SET
+             full_name = COALESCE($1, full_name),
+             email = COALESCE($2, email),
+             phone = COALESCE($3, phone),
+             address = COALESCE($4, address),
+             birthdate = COALESCE($5, birthdate),
+             gender = COALESCE($6, gender),
+             avatar_uri = COALESCE($7, avatar_uri),
+             blood_type = COALESCE($8, blood_type),
+             height = COALESCE($9, height),
+             weight = COALESCE($10, weight),
+             allergies = COALESCE($11, allergies),
+             medical_history = COALESCE($12, medical_history),
+             updated_at = NOW()
+           WHERE id = $13
+           RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, role, active, created_at, updated_at`,
+          [
+            desiredName,
+            typeof email === "string" ? email : null,
+            typeof phone === "string" ? phone : null,
+            typeof address === "string" ? address : null,
+            typeof birthdate === "string" ? birthdate : null,
+            typeof gender === "string" ? gender : null,
+            typeof avatar_uri === "string" ? avatar_uri : null,
+            typeof blood_type === "string" ? blood_type : null,
+            typeof height === "string" ? height : null,
+            typeof weight === "string" ? weight : null,
+            typeof allergies === "string" ? allergies : null,
+            typeof medical_history === "string" ? medical_history : null,
+            id,
+          ],
+        );
+      } else {
+        throw e;
+      }
+    }
     if (result.rowCount === 0)
       return res.status(404).json({ message: "User not found" });
-    res.json(result.rows[0]);
+    const row = result.rows[0] || {};
+    if (row && row.specialty === undefined) row.specialty = cleanSpecialty;
+    res.json(row);
   } catch (err) {
     console.error("PUT /api/users/:id error:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({
+      message: "Server error",
+      error: err?.message || String(err),
+      code: err?.code,
+    });
   }
 });
 
@@ -1359,19 +1410,43 @@ app.post("/api/appointments", async (req, res) => {
       } catch {}
     }
 
-    const insert = await pool.query(
-      "INSERT INTO appointments (patient, date, time, specialty, notes, done, created_by_name, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, specialty, notes, done, created_by_name, created_at",
-      [
-        String(patient).trim(),
-        String(date).trim(),
-        String(time).trim(),
-        finalSpecialty,
-        notes || null,
-        Boolean(done),
-        createdByName ? String(createdByName).trim() : null,
-        assignedDoctorUserId,
-      ],
-    );
+    let insert;
+    try {
+      insert = await pool.query(
+        "INSERT INTO appointments (patient, date, time, specialty, notes, done, created_by_name, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, patient, date, time, specialty, notes, done, created_by_name, created_at",
+        [
+          String(patient).trim(),
+          String(date).trim(),
+          String(time).trim(),
+          finalSpecialty,
+          notes || null,
+          Boolean(done),
+          createdByName ? String(createdByName).trim() : null,
+          assignedDoctorUserId,
+        ],
+      );
+    } catch (e) {
+      // If DB hasn't been migrated to add appointments.specialty yet
+      if (
+        (e && e.code === "42703") ||
+        /column\s+"specialty"/i.test(String(e?.message || ""))
+      ) {
+        insert = await pool.query(
+          "INSERT INTO appointments (patient, date, time, notes, done, created_by_name, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, patient, date, time, notes, done, created_by_name, created_at",
+          [
+            String(patient).trim(),
+            String(date).trim(),
+            String(time).trim(),
+            notes || null,
+            Boolean(done),
+            createdByName ? String(createdByName).trim() : null,
+            assignedDoctorUserId,
+          ],
+        );
+      } else {
+        throw e;
+      }
+    }
 
     if (role === "patient") {
       try {
@@ -1443,7 +1518,11 @@ app.post("/api/appointments", async (req, res) => {
     res.status(201).json(insert.rows[0]);
   } catch (err) {
     console.error("POST /api/appointments error:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({
+      message: "Server error",
+      error: err?.message || String(err),
+      code: err?.code,
+    });
   }
 });
 
