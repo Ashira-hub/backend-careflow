@@ -306,6 +306,21 @@ async function ensureSchema() {
         END IF;
 
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'users' AND column_name = 'active') THEN
+          ALTER TABLE users ADD COLUMN active BOOLEAN DEFAULT TRUE;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'users' AND column_name = 'created_at') THEN
+          ALTER TABLE users ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                       WHERE table_name = 'users' AND column_name = 'updated_at') THEN
+          ALTER TABLE users ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                        WHERE table_name = 'users' AND column_name = 'specialty') THEN
           ALTER TABLE users ADD COLUMN specialty TEXT;
         END IF;
@@ -924,8 +939,24 @@ app.put("/api/users/:id", async (req, res) => {
         ? specialty.trim()
         : null;
 
+    const paramsBase = [
+      desiredName,
+      typeof email === "string" ? email : null,
+      typeof phone === "string" ? phone : null,
+      typeof address === "string" ? address : null,
+      typeof birthdate === "string" ? birthdate : null,
+      typeof gender === "string" ? gender : null,
+      typeof avatar_uri === "string" ? avatar_uri : null,
+      typeof blood_type === "string" ? blood_type : null,
+      typeof height === "string" ? height : null,
+      typeof weight === "string" ? weight : null,
+      typeof allergies === "string" ? allergies : null,
+      typeof medical_history === "string" ? medical_history : null,
+    ];
+
     let result;
     try {
+      // New schema: includes specialty + updated_at
       result = await pool.query(
         `UPDATE users SET
            full_name = COALESCE($1, full_name),
@@ -944,68 +975,91 @@ app.put("/api/users/:id", async (req, res) => {
            updated_at = NOW()
          WHERE id = $14
          RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, specialty, role, active, created_at, updated_at`,
-        [
-          desiredName,
-          typeof email === "string" ? email : null,
-          typeof phone === "string" ? phone : null,
-          typeof address === "string" ? address : null,
-          typeof birthdate === "string" ? birthdate : null,
-          typeof gender === "string" ? gender : null,
-          typeof avatar_uri === "string" ? avatar_uri : null,
-          typeof blood_type === "string" ? blood_type : null,
-          typeof height === "string" ? height : null,
-          typeof weight === "string" ? weight : null,
-          typeof allergies === "string" ? allergies : null,
-          typeof medical_history === "string" ? medical_history : null,
-          cleanSpecialty,
-          id,
-        ],
+        [...paramsBase, cleanSpecialty, id],
       );
     } catch (e) {
-      // If deployed DB hasn't been migrated yet, avoid crashing on missing column
-      if (
-        (e && e.code === "42703") ||
-        /column\s+"specialty"/i.test(String(e?.message || ""))
-      ) {
-        result = await pool.query(
-          `UPDATE users SET
-             full_name = COALESCE($1, full_name),
-             email = COALESCE($2, email),
-             phone = COALESCE($3, phone),
-             address = COALESCE($4, address),
-             birthdate = COALESCE($5, birthdate),
-             gender = COALESCE($6, gender),
-             avatar_uri = COALESCE($7, avatar_uri),
-             blood_type = COALESCE($8, blood_type),
-             height = COALESCE($9, height),
-             weight = COALESCE($10, weight),
-             allergies = COALESCE($11, allergies),
-             medical_history = COALESCE($12, medical_history),
-             updated_at = NOW()
-           WHERE id = $13
-           RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, role, active, created_at, updated_at`,
-          [
-            desiredName,
-            typeof email === "string" ? email : null,
-            typeof phone === "string" ? phone : null,
-            typeof address === "string" ? address : null,
-            typeof birthdate === "string" ? birthdate : null,
-            typeof gender === "string" ? gender : null,
-            typeof avatar_uri === "string" ? avatar_uri : null,
-            typeof blood_type === "string" ? blood_type : null,
-            typeof height === "string" ? height : null,
-            typeof weight === "string" ? weight : null,
-            typeof allergies === "string" ? allergies : null,
-            typeof medical_history === "string" ? medical_history : null,
-            id,
-          ],
-        );
-      } else {
-        throw e;
+      const msg = String(e?.message || "");
+      const missingSpecialty =
+        (e && e.code === "42703" && /specialty/i.test(msg)) ||
+        /column\s+"specialty"/i.test(msg);
+      const missingUpdatedAt =
+        (e && e.code === "42703" && /updated_at/i.test(msg)) ||
+        /column\s+"updated_at"/i.test(msg);
+
+      try {
+        if (missingUpdatedAt && !missingSpecialty) {
+          // Old schema: specialty exists, but updated_at doesn't
+          result = await pool.query(
+            `UPDATE users SET
+               full_name = COALESCE($1, full_name),
+               email = COALESCE($2, email),
+               phone = COALESCE($3, phone),
+               address = COALESCE($4, address),
+               birthdate = COALESCE($5, birthdate),
+               gender = COALESCE($6, gender),
+               avatar_uri = COALESCE($7, avatar_uri),
+               blood_type = COALESCE($8, blood_type),
+               height = COALESCE($9, height),
+               weight = COALESCE($10, weight),
+               allergies = COALESCE($11, allergies),
+               medical_history = COALESCE($12, medical_history),
+               specialty = COALESCE($13, specialty)
+             WHERE id = $14
+             RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, specialty, role, active`,
+            [...paramsBase, cleanSpecialty, id],
+          );
+        } else if (missingSpecialty && !missingUpdatedAt) {
+          // Old schema: updated_at exists, but specialty doesn't
+          result = await pool.query(
+            `UPDATE users SET
+               full_name = COALESCE($1, full_name),
+               email = COALESCE($2, email),
+               phone = COALESCE($3, phone),
+               address = COALESCE($4, address),
+               birthdate = COALESCE($5, birthdate),
+               gender = COALESCE($6, gender),
+               avatar_uri = COALESCE($7, avatar_uri),
+               blood_type = COALESCE($8, blood_type),
+               height = COALESCE($9, height),
+               weight = COALESCE($10, weight),
+               allergies = COALESCE($11, allergies),
+               medical_history = COALESCE($12, medical_history),
+               updated_at = NOW()
+             WHERE id = $13
+             RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, role, active, created_at, updated_at`,
+            [...paramsBase, id],
+          );
+        } else if (missingSpecialty && missingUpdatedAt) {
+          // Very old schema: neither specialty nor updated_at
+          result = await pool.query(
+            `UPDATE users SET
+               full_name = COALESCE($1, full_name),
+               email = COALESCE($2, email),
+               phone = COALESCE($3, phone),
+               address = COALESCE($4, address),
+               birthdate = COALESCE($5, birthdate),
+               gender = COALESCE($6, gender),
+               avatar_uri = COALESCE($7, avatar_uri),
+               blood_type = COALESCE($8, blood_type),
+               height = COALESCE($9, height),
+               weight = COALESCE($10, weight),
+               allergies = COALESCE($11, allergies),
+               medical_history = COALESCE($12, medical_history)
+             WHERE id = $13
+             RETURNING id, full_name, email, phone, address, birthdate, gender, avatar_uri, blood_type, height, weight, allergies, medical_history, role, active`,
+            [...paramsBase, id],
+          );
+        } else {
+          throw e;
+        }
+      } catch (e3) {
+        throw e3;
       }
     }
+
     if (result.rowCount === 0)
       return res.status(404).json({ message: "User not found" });
+
     const row = result.rows[0] || {};
     if (row && row.specialty === undefined) row.specialty = cleanSpecialty;
     res.json(row);
