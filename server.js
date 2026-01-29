@@ -1836,8 +1836,20 @@ app.delete("/api/appointments/:id", async (req, res) => {
 // List users (mobile expects fields: id, name, email, role, active)
 app.get("/api/users", async (req, res) => {
   try {
+    const roleQ = String(req.query?.role || "")
+      .trim()
+      .toLowerCase();
+    let where = "";
+    const params = [];
+    if (roleQ) {
+      // Normalize to match existing roles
+      const roleNorm = roleQ === "lab staff" ? "labstaff" : roleQ;
+      where = "WHERE LOWER(role) = LOWER($1)";
+      params.push(roleNorm);
+    }
     const result = await pool.query(
-      "SELECT id, full_name AS name, role, email, active FROM users ORDER BY id DESC",
+      `SELECT id, full_name AS name, role, email, active, specialty FROM users ${where} ORDER BY id DESC`,
+      params,
     );
     res.json(result.rows);
   } catch (err) {
@@ -1852,7 +1864,7 @@ app.get("/api/users/:id", async (req, res) => {
     const { id } = req.params;
     // First try to get from profile table
     let result = await pool.query(
-      "SELECT id, fullname AS name, role, email, phone, address, birthdate, gender, avatar_uri, NULL::text AS specialty FROM profile WHERE id = $1",
+      "SELECT p.id, p.fullname AS name, p.role, p.email, p.phone, p.address, p.birthdate, p.gender, p.avatar_uri, u.specialty AS specialty FROM profile p LEFT JOIN users u ON u.id = p.id WHERE p.id = $1",
       [id],
     );
     // If not found in profile table, check users table
