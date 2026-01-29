@@ -1505,9 +1505,11 @@ app.post("/api/appointments", async (req, res) => {
     if (role === "patient") {
       try {
         const title = "Appointment Request";
+        const apptId = insert?.rows?.[0]?.id;
+        const idPart = apptId != null ? ` • ID:${String(apptId)}` : "";
         const msg = `New appointment request from ${String(patient).trim()} • ${String(
           date,
-        ).trim()} ${String(time).trim()}${notes ? ` • ${String(notes).trim()}` : ""}`;
+        ).trim()} ${String(time).trim()}${idPart}${notes ? ` • ${String(notes).trim()}` : ""}`;
         await pool.query(
           "INSERT INTO notifications (user_id, title, message) VALUES ($1, $2, $3)",
           [assignedDoctorUserId, title, msg],
