@@ -260,13 +260,6 @@ async function ensureSchema() {
       $$;
     `);
 
-    // Backfill schedule slot start/end times for older deployments
-    try {
-      await client.query(
-        "UPDATE schedule_slots SET start_time = COALESCE(start_time, time), end_time = COALESCE(end_time, time) WHERE start_time IS NULL OR end_time IS NULL",
-      );
-    } catch {}
-
     // Add any missing columns to existing tables
     await client.query(`
       DO $$
