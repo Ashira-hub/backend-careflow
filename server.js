@@ -1918,6 +1918,7 @@ app.post("/api/schedule-slots", async (req, res) => {
     const startTime = body.start_time ?? body.startTime ?? body.time;
     const endTime = body.end_time ?? body.endTime;
     const notes = body.notes;
+    const statusRaw = body.status;
     let specialtyCandidate =
       body.specialty || body.doctor_specialty || body.doctorSpecialty;
 
@@ -1959,8 +1960,20 @@ app.post("/api/schedule-slots", async (req, res) => {
         ? specialtyCandidate.trim()
         : null;
 
+    const statusNorm = (() => {
+      const s = String(statusRaw || "")
+        .trim()
+        .toLowerCase();
+      if (!s) return "available";
+      if (s === "available") return "available";
+      if (s === "not available") return "not available";
+      if (s === "not_available") return "not available";
+      if (s === "unavailable") return "not available";
+      return "available";
+    })();
+
     const insert = await pool.query(
-      "INSERT INTO schedule_slots (doctor_user_id, doctor_name, specialty, date, time, start_time, end_time, notes, status, is_booked) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'available', FALSE) RETURNING id, doctor_user_id, doctor_name, specialty, date, time, start_time, end_time, notes, status, is_booked, booked_appointment_id, created_at",
+      "INSERT INTO schedule_slots (doctor_user_id, doctor_name, specialty, date, time, start_time, end_time, notes, status, is_booked) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE) RETURNING id, doctor_user_id, doctor_name, specialty, date, time, start_time, end_time, notes, status, is_booked, booked_appointment_id, created_at",
       [
         Number(userId),
         doctorName ? String(doctorName).trim() : null,
@@ -1970,6 +1983,7 @@ app.post("/api/schedule-slots", async (req, res) => {
         String(startTime).trim(),
         String(endTime).trim(),
         notes || null,
+        statusNorm,
       ],
     );
 
@@ -1979,6 +1993,7 @@ app.post("/api/schedule-slots", async (req, res) => {
       date,
       start_time: startTime,
       end_time: endTime,
+      status: statusNorm,
     });
     res.status(201).json(insert.rows[0]);
   } catch (err) {
