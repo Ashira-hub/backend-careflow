@@ -138,6 +138,8 @@ async function ensureSchema() {
         specialty TEXT,
         date TEXT NOT NULL,
         time TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
         notes TEXT,
         status TEXT DEFAULT 'available',
         is_booked BOOLEAN DEFAULT FALSE,
@@ -258,6 +260,13 @@ async function ensureSchema() {
       $$;
     `);
 
+    // Backfill schedule slot start/end times for older deployments
+    try {
+      await client.query(
+        "UPDATE schedule_slots SET start_time = COALESCE(start_time, time), end_time = COALESCE(end_time, time) WHERE start_time IS NULL OR end_time IS NULL",
+      );
+    } catch {}
+
     // Add any missing columns to existing tables
     await client.query(`
       DO $$
@@ -297,6 +306,16 @@ async function ensureSchema() {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                       WHERE table_name = 'schedule_slots' AND column_name = 'notes') THEN
           ALTER TABLE schedule_slots ADD COLUMN notes TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'schedule_slots' AND column_name = 'start_time') THEN
+          ALTER TABLE schedule_slots ADD COLUMN start_time TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'schedule_slots' AND column_name = 'end_time') THEN
+          ALTER TABLE schedule_slots ADD COLUMN end_time TEXT;
         END IF;
 
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns
@@ -377,7 +396,15 @@ async function ensureSchema() {
           ALTER TABLE users ADD COLUMN specialty TEXT;
         END IF;
       END
-      $$`);
+      $$;
+    `);
+
+    // Backfill after migrations (in case schedule_slots columns were added above)
+    try {
+      await client.query(
+        "UPDATE schedule_slots SET start_time = COALESCE(start_time, time), end_time = COALESCE(end_time, time) WHERE start_time IS NULL OR end_time IS NULL",
+      );
+    } catch {}
 
     console.log("✅ Database schema verified/updated successfully");
     await client.query("COMMIT");
@@ -1895,12 +1922,13 @@ app.post("/api/schedule-slots", async (req, res) => {
 
     const body = req.body || {};
     const date = body.date;
-    const time = body.time;
+    const startTime = body.start_time ?? body.startTime ?? body.time;
+    const endTime = body.end_time ?? body.endTime;
     const notes = body.notes;
     let specialtyCandidate =
       body.specialty || body.doctor_specialty || body.doctorSpecialty;
 
-    if (!date || !time) {
+    if (!date || !startTime || !endTime) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
@@ -1939,13 +1967,15 @@ app.post("/api/schedule-slots", async (req, res) => {
         : null;
 
     const insert = await pool.query(
-      "INSERT INTO schedule_slots (doctor_user_id, doctor_name, specialty, date, time, notes, status, is_booked) VALUES ($1, $2, $3, $4, $5, $6, 'available', FALSE) RETURNING id, doctor_user_id, doctor_name, specialty, date, time, notes, status, is_booked, booked_appointment_id, created_at",
+      "INSERT INTO schedule_slots (doctor_user_id, doctor_name, specialty, date, time, start_time, end_time, notes, status, is_booked) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'available', FALSE) RETURNING id, doctor_user_id, doctor_name, specialty, date, time, start_time, end_time, notes, status, is_booked, booked_appointment_id, created_at",
       [
         Number(userId),
         doctorName ? String(doctorName).trim() : null,
         specialty,
         String(date).trim(),
-        String(time).trim(),
+        String(startTime).trim(),
+        String(startTime).trim(),
+        String(endTime).trim(),
         notes || null,
       ],
     );
@@ -1954,7 +1984,8 @@ app.post("/api/schedule-slots", async (req, res) => {
       id: insert.rows[0]?.id,
       doctor_user_id: userId,
       date,
-      time,
+      start_time: startTime,
+      end_time: endTime,
     });
     res.status(201).json(insert.rows[0]);
   } catch (err) {
@@ -1985,7 +2016,7 @@ app.get("/api/schedule-slots", async (req, res) => {
       q.doctor_user_id || q.doctorUserId || q.doctor_id || q.doctorId;
     const doctorNameQ = q.doctor_name || q.doctorName || q.doctor;
     const dateQ = q.date;
-    const timeQ = q.time;
+    const startTimeQ = q.start_time || q.startTime || q.time;
     const availableOnlyQ = String(q.available || "").trim() === "1";
 
     const where = [];
@@ -2011,9 +2042,9 @@ app.get("/api/schedule-slots", async (req, res) => {
       params.push(String(dateQ).trim());
     }
 
-    if (timeQ != null && String(timeQ).trim()) {
-      where.push(`time = $${params.length + 1}`);
-      params.push(String(timeQ).trim());
+    if (startTimeQ != null && String(startTimeQ).trim()) {
+      where.push(`start_time = $${params.length + 1}`);
+      params.push(String(startTimeQ).trim());
     }
 
     if (role === "patient" || availableOnlyQ) {
@@ -2023,7 +2054,7 @@ app.get("/api/schedule-slots", async (req, res) => {
       );
     }
 
-    const sql = `SELECT id, doctor_user_id, doctor_name, specialty, date, time, notes, status, is_booked, booked_appointment_id, created_at
+    const sql = `SELECT id, doctor_user_id, doctor_name, specialty, date, time, start_time, end_time, notes, status, is_booked, booked_appointment_id, created_at
                 FROM schedule_slots
                 ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
                 ORDER BY date ASC, time ASC, id ASC`;
@@ -2060,7 +2091,8 @@ app.put("/api/schedule-slots/:id", async (req, res) => {
     }
 
     const date = body.date;
-    const time = body.time;
+    const startTime = body.start_time ?? body.startTime ?? body.time;
+    const endTime = body.end_time ?? body.endTime;
     const notes = body.notes;
     const status = body.status;
 
@@ -2068,13 +2100,17 @@ app.put("/api/schedule-slots/:id", async (req, res) => {
       `UPDATE schedule_slots
          SET date = COALESCE($1, date),
              time = COALESCE($2, time),
-             notes = COALESCE($3, notes),
-             status = COALESCE($4, status)
-       WHERE id = $5 AND doctor_user_id = $6
-       RETURNING id, doctor_user_id, doctor_name, specialty, date, time, notes, status, is_booked, booked_appointment_id, created_at`,
+             start_time = COALESCE($3, start_time),
+             end_time = COALESCE($4, end_time),
+             notes = COALESCE($5, notes),
+             status = COALESCE($6, status)
+       WHERE id = $7 AND doctor_user_id = $8
+       RETURNING id, doctor_user_id, doctor_name, specialty, date, time, start_time, end_time, notes, status, is_booked, booked_appointment_id, created_at`,
       [
         date != null ? String(date).trim() : null,
-        time != null ? String(time).trim() : null,
+        startTime != null ? String(startTime).trim() : null,
+        startTime != null ? String(startTime).trim() : null,
+        endTime != null ? String(endTime).trim() : null,
         notes != null ? notes : null,
         status != null ? String(status).trim() : null,
         id,
