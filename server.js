@@ -129,6 +129,22 @@ async function ensureSchema() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       )`);
 
+    // Create schedule slots table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS schedule_slots (
+        id SERIAL PRIMARY KEY,
+        doctor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        doctor_name TEXT,
+        specialty TEXT,
+        date TEXT NOT NULL,
+        time TEXT NOT NULL,
+        notes TEXT,
+        status TEXT DEFAULT 'available',
+        is_booked BOOLEAN DEFAULT FALSE,
+        booked_appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )`);
+
     // Create lab_tests table if not exists
     await client.query(`
       CREATE TABLE IF NOT EXISTS lab_tests (
@@ -260,6 +276,42 @@ async function ensureSchema() {
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
                       WHERE table_name = 'appointments' AND column_name = 'specialty') THEN
           ALTER TABLE appointments ADD COLUMN specialty TEXT;
+        END IF;
+
+        -- Add missing columns to schedule_slots
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'schedule_slots' AND column_name = 'doctor_user_id') THEN
+          ALTER TABLE schedule_slots ADD COLUMN doctor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'schedule_slots' AND column_name = 'doctor_name') THEN
+          ALTER TABLE schedule_slots ADD COLUMN doctor_name TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'schedule_slots' AND column_name = 'specialty') THEN
+          ALTER TABLE schedule_slots ADD COLUMN specialty TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'schedule_slots' AND column_name = 'notes') THEN
+          ALTER TABLE schedule_slots ADD COLUMN notes TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'schedule_slots' AND column_name = 'status') THEN
+          ALTER TABLE schedule_slots ADD COLUMN status TEXT DEFAULT 'available';
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'schedule_slots' AND column_name = 'is_booked') THEN
+          ALTER TABLE schedule_slots ADD COLUMN is_booked BOOLEAN DEFAULT FALSE;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'schedule_slots' AND column_name = 'booked_appointment_id') THEN
+          ALTER TABLE schedule_slots ADD COLUMN booked_appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL;
         END IF;
         
         -- Add missing columns to lab_tests
@@ -1830,6 +1882,288 @@ app.delete("/api/appointments/:id", async (req, res) => {
     res.status(204).send();
   } catch (err) {
     console.error("DELETE /api/appointments/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Schedule Slots API
+// Create schedule slot (doctor)
+app.post("/api/schedule-slots", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const body = req.body || {};
+    const date = body.date;
+    const time = body.time;
+    const notes = body.notes;
+    const specialtyCandidate =
+      body.specialty || body.doctor_specialty || body.doctorSpecialty;
+
+    if (!date || !time) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    let role = null;
+    let fullName = null;
+    try {
+      const ures = await pool.query(
+        "SELECT role, full_name, specialty FROM users WHERE id = $1",
+        [userId],
+      );
+      if (ures.rowCount > 0) {
+        role =
+          (ures.rows[0]?.role || null) &&
+          String(ures.rows[0].role).toLowerCase();
+        fullName = ures.rows[0]?.full_name || null;
+        if (!specialtyCandidate && ures.rows[0]?.specialty) {
+          specialtyCandidate = ures.rows[0].specialty;
+        }
+      }
+    } catch {}
+
+    if (role !== "doctor") {
+      return res.status(403).json({ message: "Only doctors can create slots" });
+    }
+
+    const doctorName =
+      body.doctorName ||
+      body.doctor_name ||
+      body.createdByName ||
+      body.created_by_name ||
+      fullName ||
+      null;
+    const specialty =
+      typeof specialtyCandidate === "string" && specialtyCandidate.trim()
+        ? specialtyCandidate.trim()
+        : null;
+
+    const insert = await pool.query(
+      "INSERT INTO schedule_slots (doctor_user_id, doctor_name, specialty, date, time, notes, status, is_booked) VALUES ($1, $2, $3, $4, $5, $6, 'available', FALSE) RETURNING id, doctor_user_id, doctor_name, specialty, date, time, notes, status, is_booked, booked_appointment_id, created_at",
+      [
+        Number(userId),
+        doctorName ? String(doctorName).trim() : null,
+        specialty,
+        String(date).trim(),
+        String(time).trim(),
+        notes || null,
+      ],
+    );
+
+    logActivity(userId, "schedule_slot", "Schedule slot created", {
+      id: insert.rows[0]?.id,
+      doctor_user_id: userId,
+      date,
+      time,
+    });
+    res.status(201).json(insert.rows[0]);
+  } catch (err) {
+    console.error("POST /api/schedule-slots error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// List schedule slots
+app.get("/api/schedule-slots", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    let role = null;
+    try {
+      const ures = await pool.query("SELECT role FROM users WHERE id = $1", [
+        userId,
+      ]);
+      role =
+        ures.rowCount > 0 && ures.rows[0]?.role
+          ? String(ures.rows[0].role).toLowerCase()
+          : null;
+    } catch {}
+
+    const q = req.query || {};
+    const doctorUserIdQ =
+      q.doctor_user_id || q.doctorUserId || q.doctor_id || q.doctorId;
+    const doctorNameQ = q.doctor_name || q.doctorName || q.doctor;
+    const dateQ = q.date;
+    const timeQ = q.time;
+    const availableOnlyQ = String(q.available || "").trim() === "1";
+
+    const where = [];
+    const params = [];
+
+    if (role === "doctor") {
+      where.push(`doctor_user_id = $${params.length + 1}`);
+      params.push(Number(userId));
+    } else {
+      if (doctorUserIdQ != null && String(doctorUserIdQ).trim()) {
+        where.push(`doctor_user_id = $${params.length + 1}`);
+        params.push(Number(doctorUserIdQ));
+      } else if (doctorNameQ != null && String(doctorNameQ).trim()) {
+        where.push(
+          `LOWER(COALESCE(doctor_name, '')) LIKE LOWER($${params.length + 1})`,
+        );
+        params.push(`%${String(doctorNameQ).trim()}%`);
+      }
+    }
+
+    if (dateQ != null && String(dateQ).trim()) {
+      where.push(`date = $${params.length + 1}`);
+      params.push(String(dateQ).trim());
+    }
+
+    if (timeQ != null && String(timeQ).trim()) {
+      where.push(`time = $${params.length + 1}`);
+      params.push(String(timeQ).trim());
+    }
+
+    if (role === "patient" || availableOnlyQ) {
+      where.push("is_booked = FALSE");
+      where.push(
+        "LOWER(COALESCE(status, 'available')) IN ('available', 'schedule')",
+      );
+    }
+
+    const sql = `SELECT id, doctor_user_id, doctor_name, specialty, date, time, notes, status, is_booked, booked_appointment_id, created_at
+                FROM schedule_slots
+                ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+                ORDER BY date ASC, time ASC, id ASC`;
+    const result = await pool.query(sql, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET /api/schedule-slots error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Update schedule slot (doctor)
+app.put("/api/schedule-slots/:id", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const { id } = req.params;
+    const body = req.body || {};
+
+    let role = null;
+    try {
+      const ures = await pool.query("SELECT role FROM users WHERE id = $1", [
+        userId,
+      ]);
+      role =
+        ures.rowCount > 0 && ures.rows[0]?.role
+          ? String(ures.rows[0].role).toLowerCase()
+          : null;
+    } catch {}
+
+    if (role !== "doctor") {
+      return res.status(403).json({ message: "Only doctors can update slots" });
+    }
+
+    const date = body.date;
+    const time = body.time;
+    const notes = body.notes;
+    const status = body.status;
+
+    const upd = await pool.query(
+      `UPDATE schedule_slots
+         SET date = COALESCE($1, date),
+             time = COALESCE($2, time),
+             notes = COALESCE($3, notes),
+             status = COALESCE($4, status)
+       WHERE id = $5 AND doctor_user_id = $6
+       RETURNING id, doctor_user_id, doctor_name, specialty, date, time, notes, status, is_booked, booked_appointment_id, created_at`,
+      [
+        date != null ? String(date).trim() : null,
+        time != null ? String(time).trim() : null,
+        notes != null ? notes : null,
+        status != null ? String(status).trim() : null,
+        id,
+        Number(userId),
+      ],
+    );
+    if (upd.rowCount === 0)
+      return res.status(404).json({ message: "Schedule slot not found" });
+    res.json(upd.rows[0]);
+  } catch (err) {
+    console.error("PUT /api/schedule-slots/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Delete schedule slot (doctor)
+app.delete("/api/schedule-slots/:id", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const { id } = req.params;
+
+    let role = null;
+    try {
+      const ures = await pool.query("SELECT role FROM users WHERE id = $1", [
+        userId,
+      ]);
+      role =
+        ures.rowCount > 0 && ures.rows[0]?.role
+          ? String(ures.rows[0].role).toLowerCase()
+          : null;
+    } catch {}
+
+    if (role !== "doctor") {
+      return res.status(403).json({ message: "Only doctors can delete slots" });
+    }
+
+    const del = await pool.query(
+      "DELETE FROM schedule_slots WHERE id = $1 AND doctor_user_id = $2",
+      [id, Number(userId)],
+    );
+    if (del.rowCount === 0)
+      return res.status(404).json({ message: "Schedule slot not found" });
+    res.status(204).send();
+  } catch (err) {
+    console.error("DELETE /api/schedule-slots/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Book schedule slot (atomic)
+app.post("/api/schedule-slots/:id/book", async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const { id } = req.params;
+    const body = req.body || {};
+    const appointmentId =
+      body.appointment_id ?? body.appointmentId ?? body.booked_appointment_id;
+
+    const upd = await pool.query(
+      `UPDATE schedule_slots
+         SET is_booked = TRUE,
+             status = 'booked',
+             booked_appointment_id = COALESCE($2, booked_appointment_id)
+       WHERE id = $1 AND is_booked = FALSE
+       RETURNING id, doctor_user_id, doctor_name, specialty, date, time, notes, status, is_booked, booked_appointment_id, created_at`,
+      [id, appointmentId != null ? Number(appointmentId) : null],
+    );
+
+    if (upd.rowCount === 0) {
+      const chk = await pool.query(
+        "SELECT id, is_booked FROM schedule_slots WHERE id = $1",
+        [id],
+      );
+      if (chk.rowCount === 0)
+        return res.status(404).json({ message: "Schedule slot not found" });
+      return res.status(409).json({ message: "Schedule slot already booked" });
+    }
+
+    logActivity(userId, "schedule_slot_book", "Schedule slot booked", {
+      slot_id: id,
+      appointment_id: appointmentId ?? null,
+    });
+    res.json(upd.rows[0]);
+  } catch (err) {
+    console.error("POST /api/schedule-slots/:id/book error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
