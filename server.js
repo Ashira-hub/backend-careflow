@@ -1897,7 +1897,7 @@ app.post("/api/schedule-slots", async (req, res) => {
     const date = body.date;
     const time = body.time;
     const notes = body.notes;
-    const specialtyCandidate =
+    let specialtyCandidate =
       body.specialty || body.doctor_specialty || body.doctorSpecialty;
 
     if (!date || !time) {
