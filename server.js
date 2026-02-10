@@ -32,10 +32,10 @@ function getUserId(req) {
 // PostgreSQL connection
 const pool = new Pool({
   user: process.env.PGUSER || "postgres",
-  host: process.env.PGHOST || "trolley.proxy.rlwy.net",
+  host: process.env.PGHOST || "caboose.proxy.rlwy.net",
   database: process.env.PGDATABASE || "railway",
-  password: process.env.PGPASSWORD || "crLmSsXvBTuadOMQrLmTPMDKKrBtQBJk",
-  port: Number(process.env.PGPORT) || 43987,
+  password: process.env.PGPASSWORD || "WtziBHNgEUmPZrDgBRccZyUORgMuHGtM",
+  port: Number(process.env.PGPORT) || 24200,
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
