@@ -685,12 +685,18 @@ app.get("/api/lab-tests", async (req, res) => {
   try {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    // Get user's full name to match patient column
+    const userRes = await pool.query(
+      "SELECT full_name FROM users WHERE id = $1",
+      [userId],
+    );
+    const userFullName = userRes.rows[0]?.full_name || "";
     const result = await pool.query(
       `SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
          FROM lab_tests
-         WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
+         WHERE created_by_user_id = $1 OR created_by_user_id IS NULL OR LOWER(patient) = LOWER($2)
          ORDER BY id DESC`,
-      [userId],
+      [userId, userFullName],
     );
     res.json(result.rows);
   } catch (err) {
