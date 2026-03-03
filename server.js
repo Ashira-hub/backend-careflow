@@ -388,6 +388,17 @@ async function ensureSchema() {
                        WHERE table_name = 'users' AND column_name = 'specialty') THEN
           ALTER TABLE users ADD COLUMN specialty TEXT;
         END IF;
+
+        -- Add missing columns to prescription (compat)
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name = 'prescription' AND column_name = 'instruction') THEN
+          ALTER TABLE prescription ADD COLUMN instruction TEXT;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name = 'prescriptions' AND column_name = 'instruction') THEN
+          ALTER TABLE prescriptions ADD COLUMN instruction TEXT;
+        END IF;
       END
       $$;
     `);
@@ -546,7 +557,11 @@ app.get("/api/prescriptions", async (req, res) => {
     let result;
     if (status) {
       result = await pool.query(
-        `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_by_user_id, created_at
+        `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength,
+                instruction,
+                description,
+                COALESCE(instruction, description) AS instruction,
+                status, created_by_user_id, created_at
            FROM prescription
            WHERE LOWER(COALESCE(status,'')) = $1
            ORDER BY created_at DESC`,
@@ -554,7 +569,11 @@ app.get("/api/prescriptions", async (req, res) => {
       );
     } else {
       result = await pool.query(
-        `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_by_user_id, created_at
+        `SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength,
+                instruction,
+                description,
+                COALESCE(instruction, description) AS instruction,
+                status, created_by_user_id, created_at
            FROM prescription
            ORDER BY created_at DESC`,
       );
@@ -879,7 +898,7 @@ app.put("/api/prescription/:id/status", async (req, res) => {
       typeof status === "string" ? status.trim().toLowerCase() : null;
     if (!clean) return res.status(400).json({ message: "Missing status" });
     const upd = await pool.query(
-      "UPDATE prescription SET status = $1 WHERE id = $2 RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id, status, created_at",
+      "UPDATE prescription SET status = $1 WHERE id = $2 RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, instruction, description, status, created_by_user_id, created_at",
       [clean, id],
     );
     if (upd.rowCount === 0)
@@ -2729,6 +2748,7 @@ app.post("/api/prescription", async (req, res) => {
       medicine,
       quantity,
       dosage_strength,
+      instruction,
       description,
     } = req.body || {};
     if (!patient_name || !doctor_name || !medicine) {
@@ -2737,14 +2757,15 @@ app.post("/api/prescription", async (req, res) => {
       });
     }
     const result = await pool.query(
-      "INSERT INTO prescription (doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, created_at",
+      "INSERT INTO prescription (doctor_name, patient_name, medicine, quantity, dosage_strength, instruction, description, created_by_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, instruction, description, created_at",
       [
         String(doctor_name).trim(),
         String(patient_name).trim(),
         String(medicine).trim(),
         Number(quantity) || 0,
         dosage_strength || null,
-        description || null,
+        instruction ?? null,
+        description ?? null,
         userId,
       ],
     );
@@ -2808,7 +2829,7 @@ app.get("/api/prescription/:id", async (req, res) => {
       return res.status(400).json({ message: "Invalid user id" });
     }
     const result = await pool.query(
-      "SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_at FROM prescription WHERE created_by_user_id = $1 ORDER BY created_at DESC",
+      "SELECT id, doctor_name, patient_name, medicine, quantity, dosage_strength, instruction, description, COALESCE(instruction, description) AS instruction, status, created_at FROM prescription WHERE created_by_user_id = $1 ORDER BY created_at DESC",
       [userId],
     );
     res.json(result.rows);
@@ -2830,6 +2851,7 @@ app.put("/api/prescription/:id", async (req, res) => {
       medicine,
       quantity,
       dosage_strength,
+      instruction,
       description,
       status,
     } = req.body || {};
@@ -2860,16 +2882,18 @@ app.put("/api/prescription/:id", async (req, res) => {
              medicine = COALESCE($3, medicine),
              quantity = COALESCE($4, quantity),
              dosage_strength = COALESCE($5, dosage_strength),
-             description = COALESCE($6, description),
-             status = COALESCE($7, status)
-         WHERE id = $8
-         RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, description, status, created_at`,
+             instruction = COALESCE($6, instruction),
+             description = COALESCE($7, description),
+             status = COALESCE($8, status)
+         WHERE id = $9
+         RETURNING id, doctor_name, patient_name, medicine, quantity, dosage_strength, instruction, description, status, created_at`,
       [
         doctor_name ?? null,
         patient_name ?? null,
         medicine ?? null,
         quantity ?? null,
         dosage_strength ?? null,
+        instruction ?? null,
         description ?? null,
         nextStatus,
         id,
