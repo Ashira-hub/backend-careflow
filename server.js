@@ -548,7 +548,7 @@ app.post("/api/notifications", async (req, res) => {
 });
 
 // List prescriptions (optionally filter by status)
-app.get("/api/prescriptions", async (req, res) => {
+app.get("/api/prescription", async (req, res) => {
   try {
     const status =
       typeof req.query?.status === "string"
@@ -580,7 +580,7 @@ app.get("/api/prescriptions", async (req, res) => {
     }
     res.json(result.rows);
   } catch (err) {
-    console.error("GET /api/prescriptions error:", err);
+    console.error("GET /api/prescription error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -628,13 +628,31 @@ app.get("/api/lab-records", async (req, res) => {
   try {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
-    const result = await pool.query(
-      `SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
-         FROM lab_records
-         WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
-         ORDER BY id DESC`,
+    const userRes = await pool.query(
+      "SELECT full_name, role FROM users WHERE id = $1",
       [userId],
     );
+    const userFullName = String(userRes.rows[0]?.full_name || "").trim();
+    const userRole = String(userRes.rows[0]?.role || "").toLowerCase();
+    const likeName = userFullName ? `%${userFullName}%` : "%";
+
+    const baseSelect =
+      'SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt" FROM lab_records';
+
+    const result =
+      userRole === "patient" && userFullName
+        ? await pool.query(
+            `${baseSelect}
+             WHERE LOWER(patient) = LOWER($1) OR patient ILIKE $2
+             ORDER BY id DESC`,
+            [userFullName, likeName],
+          )
+        : await pool.query(
+            `${baseSelect}
+             WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
+             ORDER BY id DESC`,
+            [userId],
+          );
     res.json(result.rows);
   } catch (err) {
     console.error("GET /api/lab-records error:", err);
@@ -704,19 +722,34 @@ app.get("/api/lab-tests", async (req, res) => {
   try {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
-    // Get user's full name to match patient column
+    // Get user's full name/role to match patient column
     const userRes = await pool.query(
-      "SELECT full_name FROM users WHERE id = $1",
+      "SELECT full_name, role FROM users WHERE id = $1",
       [userId],
     );
-    const userFullName = userRes.rows[0]?.full_name || "";
-    const result = await pool.query(
-      `SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"
-         FROM lab_tests
-         WHERE created_by_user_id = $1 OR created_by_user_id IS NULL OR LOWER(patient) = LOWER($2)
-         ORDER BY id DESC`,
-      [userId, userFullName],
-    );
+    const userFullName = String(userRes.rows[0]?.full_name || "").trim();
+    const userRole = String(userRes.rows[0]?.role || "").toLowerCase();
+    const likeName = userFullName ? `%${userFullName}%` : "%";
+
+    const baseSelect =
+      'SELECT id, test_name, patient, category, status, date, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt" FROM lab_tests';
+
+    // For patients, prioritize seeing their own tests based on patient name.
+    // For others (doctor/lab staff), keep the created_by_user_id based access.
+    const result =
+      userRole === "patient" && userFullName
+        ? await pool.query(
+            `${baseSelect}
+             WHERE LOWER(patient) = LOWER($1) OR patient ILIKE $2
+             ORDER BY id DESC`,
+            [userFullName, likeName],
+          )
+        : await pool.query(
+            `${baseSelect}
+             WHERE created_by_user_id = $1 OR created_by_user_id IS NULL OR LOWER(patient) = LOWER($2) OR patient ILIKE $3
+             ORDER BY id DESC`,
+            [userId, userFullName, likeName],
+          );
     res.json(result.rows);
   } catch (err) {
     console.error("GET /api/lab-tests error:", err);
@@ -1296,13 +1329,32 @@ app.get("/api/patient-records/all", async (req, res) => {
   try {
     const userId = getUserId(req);
     if (!userId) return res.status(401).json({ message: "Unauthorized" });
-    const result = await pool.query(
-      `SELECT id, patient, date, time, notes, doctor, medicine, dosage, created_at
-         FROM patient_records
-         WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
-         ORDER BY created_at DESC`,
+    const meRes = await pool.query(
+      "SELECT id, full_name, role FROM users WHERE id = $1",
       [userId],
     );
+    const me = meRes.rows?.[0] || {};
+    const myRole = String(me?.role || "").toLowerCase();
+    const myName = String(me?.full_name || "").trim();
+
+    const sqlBase =
+      "SELECT id, patient, date, time, notes, doctor, medicine, dosage, created_at FROM patient_records";
+
+    // Doctors see records they created (existing behavior). Patients should see records for themselves.
+    const result =
+      myRole === "patient" && myName
+        ? await pool.query(
+            `${sqlBase}
+             WHERE LOWER(patient) = LOWER($1)
+             ORDER BY created_at DESC`,
+            [myName],
+          )
+        : await pool.query(
+            `${sqlBase}
+             WHERE created_by_user_id = $1 OR created_by_user_id IS NULL
+             ORDER BY created_at DESC`,
+            [userId],
+          );
     res.json(result.rows);
   } catch (err) {
     console.error("GET /api/patient-records/all error:", err);
